@@ -1,0 +1,13 @@
+{
+  "name": "excel_view",
+  "version": "1.0.0",
+  "description": "Frappe Excel View — spreadsheet experience for any DocType",
+  "license": "MIT",
+  "dependencies": {
+    "handsontable": "6.2.2",
+    "hyperformula": "^2.7.0",
+    "papaparse": "^5.4.1",
+    "@simonwep/pickr": "^1.9.0",
+    "numfmt": "^3.2.4"
+  }
+}
