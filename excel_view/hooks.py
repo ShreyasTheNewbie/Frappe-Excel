@@ -25,8 +25,16 @@ app_license = "mit"
 # ------------------
 
 # include js, css files in header of desk.html
-# app_include_css = "/assets/excel_view/css/excel_view.css"
-# app_include_js = "/assets/excel_view/js/excel_view.js"
+# Router bundle (~2KB) — loads on every Frappe page to register the view
+# and monkey-patch routing. Zero cost for non-Excel-View users.
+app_include_js = ["excel_view_router.bundle.js"]
+
+# CSS — always include (tiny, needed for ev-page-active z-index fix etc.)
+app_include_css = ["excel_view.bundle.css"]
+
+# The full deps bundle (excel_view.bundle.js, ~1.4MB with HOT + HF + deps)
+# is NOT listed here. It is loaded dynamically by excel_view_router.bundle.js
+# via a <script> tag injection when the user first opens Excel View.
 
 # include js, css files in header of web template
 # web_include_css = "/assets/excel_view/css/excel_view.css"

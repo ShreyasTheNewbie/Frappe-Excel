@@ -1,0 +1,903 @@
+/**
+ * excel_view/excel_view.bundle.scss
+ *
+ * Microsoft Excel 365 / Mac UI — faithful light + dark theme.
+ * Reference: Excel Mac UI (col/row headers = plain gray, no colored borders;
+ * green is ONLY in the ribbon/toolbar, not the grid).
+ *
+ * NOTE: Handsontable CSS is injected via <link> in excel_view.bundle.js.
+ */
+
+// ── Token map ─────────────────────────────────────────────────────────────────
+
+.ev-page {
+	// Excel's signature green — used for toolbar accent ONLY
+	--ev-green:         #1d6f42;
+	--ev-green-dark:    #185c37;
+	--ev-green-light:   #e2efda;
+
+	// Grid
+	--ev-header-bg:     #f3f3f3;       // col/row header fill (light gray)
+	--ev-header-text:   #404040;       // header text
+	--ev-header-border: #d4d4d4;       // header separator (plain gray — no green!)
+	--ev-grid-line:     #d4d4d4;       // inner cell border
+	--ev-cell-bg:       #ffffff;
+
+	// Text
+	--ev-text:          #1a1a1a;
+	--ev-text-muted:    #767676;
+
+	// Excel selection (blue, not green)
+	--ev-sel-border:    #1264a3;
+	--ev-sel-fill:      #deebf7;       // solid Excel selection blue tint
+	--ev-sel-range:     rgba(18, 100, 163, 0.09);
+
+	// Formula bar
+	--ev-fb-bg:         #ffffff;
+	--ev-fb-border:     #d4d4d4;
+	--ev-fb-height:     28px;
+
+	// Read-only
+	--ev-dimmed-bg:     #f8f8f8;
+	--ev-dimmed-text:   #a0a0a0;
+
+	// Fonts — Calibri (Office), then system
+	--ev-font:          Calibri, "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+	--ev-font-size:     12px;
+	--ev-font-mono:     Consolas, "Cascadia Code", "Courier New", monospace;
+}
+
+// ── Page container ────────────────────────────────────────────────────────────
+
+.ev-page {
+	.frappe-list {
+		display: flex;
+		flex-direction: column;
+		height: calc(100vh - 120px);
+		overflow: hidden;
+		background: var(--ev-cell-bg);
+	}
+
+	.list-paging-area .comparison-message {
+		display: none;
+	}
+}
+
+// ── Formula bar ───────────────────────────────────────────────────────────────
+// Matches Excel's compact formula bar:
+//  [ A1  ] | [ fx ] [ Value or formula…                        ]
+
+.ev-formula-bar-outer {
+	flex-shrink: 0;
+	position: relative; // anchor for formula help popup (position: absolute)
+}
+
+.ev-formula-bar {
+	display: flex;
+	align-items: stretch;
+	height: var(--ev-fb-height);
+	background: var(--ev-fb-bg);
+	border-bottom: 1px solid var(--ev-fb-border);
+	font-family: var(--ev-font);
+	font-size: var(--ev-font-size);
+
+	// ── Name box ──────────────────────────────────────────────────────────────
+	.ev-cell-address {
+		flex: 0 0 82px;
+		display: flex;
+		align-items: center;
+		border-right: 1px solid var(--ev-fb-border);
+		background: var(--ev-fb-bg);
+
+		.ev-address-input {
+			width: 100%;
+			height: 100%;
+			border: none;
+			outline: none;
+			background: transparent;
+			padding: 0 6px;
+			font-family: var(--ev-font-mono);
+			font-size: 11px;
+			color: var(--ev-text);
+			text-align: center;
+			cursor: default;
+
+			&:focus {
+				background: #eff6fc;
+				color: var(--ev-sel-border);
+				cursor: text;
+			}
+		}
+	}
+
+	// ── fx button ─────────────────────────────────────────────────────────────
+	.ev-fx-icon {
+		flex: 0 0 34px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		color: var(--ev-green);
+		font-size: 12px;
+		font-style: italic;
+		font-weight: 700;
+		border-right: 1px solid var(--ev-fb-border);
+		cursor: pointer;
+		-webkit-user-select: none;
+		user-select: none;
+
+		sub {
+			font-size: 8px;
+			color: var(--ev-green);
+		}
+
+		&:hover {
+			background: var(--ev-green-light);
+		}
+	}
+
+	// ── Formula / value input ─────────────────────────────────────────────────
+	.ev-formula-input-wrap {
+		flex: 1 1 auto;
+		display: flex;
+		align-items: center;
+
+		.ev-formula-input {
+			width: 100%;
+			height: 100%;
+			border: none;
+			outline: none;
+			background: transparent;
+			padding: 0 8px;
+			font-family: var(--ev-font);
+			font-size: var(--ev-font-size);
+			color: var(--ev-text);
+
+			&:focus {
+				background: #eff6fc;
+			}
+
+			&::placeholder {
+				color: var(--ev-text-muted);
+				font-style: italic;
+				font-size: 11px;
+			}
+		}
+	}
+}
+
+// ── Grid wrapper ──────────────────────────────────────────────────────────────
+
+.ev-grid-wrapper {
+	flex: 1 1 auto;
+	overflow: hidden;
+	position: relative;
+
+	.ev-hot-container {
+		width: 100%;
+		height: 100%;
+		overflow: hidden;
+	}
+}
+
+// ── Handsontable — Excel Mac faithful overrides ───────────────────────────────
+
+.ev-page .handsontable {
+	font-family: var(--ev-font);
+	font-size: var(--ev-font-size);
+	color: var(--ev-text);
+
+	// ── All base cells ────────────────────────────────────────────────────────
+	td {
+		background: var(--ev-cell-bg);
+		color: var(--ev-text);
+		border-color: var(--ev-grid-line) !important;
+		padding: 0 4px;
+		line-height: 20px;
+	}
+
+	// ── Column headers ─────────────────────────────────────────────────────────
+	// Plain gray — Excel green is NOT in the grid; it's in the ribbon.
+	thead th,
+	.htColHeader,
+	.ht_clone_top th,
+	.ht_clone_top .htColHeader {
+		background: var(--ev-header-bg) !important;
+		color: var(--ev-header-text) !important;
+		font-weight: 600;
+		font-size: 11px;
+		border-color: var(--ev-header-border) !important;
+		text-align: center;
+		padding: 0 4px;
+		line-height: 20px;
+	}
+
+	// Active column header highlight (when column selected)
+	.ht_clone_top .htColHeader.ht__active_highlight {
+		background: #d5e8f3 !important;
+		color: var(--ev-sel-border) !important;
+	}
+
+	// ── Row headers ───────────────────────────────────────────────────────────
+	.htRowHeader,
+	.ht_clone_left th,
+	.ht_clone_left .htRowHeader,
+	.ht_clone_top_left_corner th {
+		background: var(--ev-header-bg) !important;
+		color: var(--ev-header-text) !important;
+		font-size: 11px;
+		font-weight: 400;
+		border-color: var(--ev-header-border) !important;
+		text-align: center;
+	}
+
+	// Active row header (when row selected)
+	.ht_clone_left th.ht__active_highlight {
+		background: #d5e8f3 !important;
+		color: var(--ev-sel-border) !important;
+	}
+
+	// ── Selected cell — thin Excel-blue border ─────────────────────────────────
+	td.current,
+	.current {
+		outline: 2px solid var(--ev-sel-border) !important;
+		outline-offset: -2px;
+		background: var(--ev-cell-bg) !important;
+	}
+
+	// ── Selection range — solid Excel blue tint ────────────────────────────────
+	td.area,
+	.area {
+		background: var(--ev-sel-range) !important;
+	}
+
+	// ── Read-only / dimmed ────────────────────────────────────────────────────
+	td.htDimmed {
+		background: var(--ev-dimmed-bg) !important;
+		color: var(--ev-dimmed-text) !important;
+		font-style: normal !important;
+	}
+
+	// ── ID / name column (blue like Excel hyperlinks) ─────────────────────────
+	td.ev-name-col {
+		font-family: var(--ev-font-mono);
+		font-size: 11px;
+		color: #0563c1;  // Excel hyperlink blue
+	}
+
+	// ── Currency / numeric ────────────────────────────────────────────────────
+	td.ev-currency-cell,
+	td.htNumeric {
+		text-align: right;
+		padding-right: 6px;
+	}
+
+	// ── Checkbox ──────────────────────────────────────────────────────────────
+	td.ev-check-cell {
+		text-align: center;
+	}
+
+	// ── Link cells ────────────────────────────────────────────────────────────
+	.ev-link-cell {
+		color: #0563c1;
+		text-decoration: none;
+
+		&:hover {
+			text-decoration: underline;
+			color: var(--ev-green);
+		}
+	}
+
+	// ── No alternating rows (Excel default = clean white) ─────────────────────
+	tbody tr:nth-child(odd) td,
+	tbody tr:nth-child(even) td {
+		background: var(--ev-cell-bg);
+	}
+
+	// Hover — barely visible, Excel-like
+	tbody tr:hover td:not(.current):not(.area) {
+		background: #f5f9fc !important;
+	}
+
+	// ── Context menu ─────────────────────────────────────────────────────────
+	.htContextMenu table.htCore {
+		border: 1px solid #c8c8c8;
+		border-radius: 2px;
+		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.14);
+		font-size: 12px;
+		font-family: var(--ev-font);
+
+		td {
+			padding: 5px 24px 5px 12px;
+			color: var(--ev-text);
+			background: var(--ev-cell-bg);
+			border: none !important;
+
+			&:hover,
+			&.htHovered {
+				background: var(--ev-green-light) !important;
+				color: var(--ev-green-dark) !important;
+			}
+		}
+
+		.htSeparator td {
+			height: 1px;
+			padding: 0;
+			background: var(--ev-grid-line) !important;
+		}
+	}
+
+	// ── Column resize handle ──────────────────────────────────────────────────
+	.manualColumnResizer {
+		background: var(--ev-sel-border) !important;
+	}
+}
+
+// ── Link dropdown ─────────────────────────────────────────────────────────────
+
+.ev-link-dropdown {
+	background: #ffffff;
+	border: 1px solid #c8c8c8;
+	border-radius: 2px;
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+	max-height: 200px;
+	overflow-y: auto;
+	font-family: Calibri, "Segoe UI", sans-serif;
+	font-size: 12px;
+
+	.ev-link-option {
+		padding: 5px 10px;
+		cursor: pointer;
+		color: #1a1a1a;
+		border-bottom: 1px solid #f0f0f0;
+
+		&:hover {
+			background: #e2efda;
+			color: #185c37;
+		}
+	}
+
+	.ev-link-no-results {
+		padding: 8px 10px;
+		color: #767676;
+		font-style: italic;
+	}
+}
+
+// ── Editors ───────────────────────────────────────────────────────────────────
+
+.ev-select-editor,
+.ev-date-editor {
+	outline: 2px solid #1264a3 !important;
+	border-radius: 0;
+	font-family: Calibri, "Segoe UI", sans-serif;
+	font-size: 12px;
+}
+
+.ev-date-editor {
+	color-scheme: light dark;
+}
+
+// ── Toolbar outer wrapper ──────────────────────────────────────────────────────
+
+.ev-toolbar-outer {
+	flex-shrink: 0;
+	position: relative; // for color-palette absolute positioning
+}
+
+// ── Toolbar ───────────────────────────────────────────────────────────────────
+
+.ev-toolbar {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	height: 34px;
+	padding: 0 8px;
+	background: var(--ev-header-bg);
+	border-bottom: 1px solid var(--ev-header-border);
+	-webkit-user-select: none;
+	user-select: none;
+	overflow-x: auto;
+	overflow-y: hidden;
+	scrollbar-width: none;
+
+	&::-webkit-scrollbar { display: none; }
+}
+
+.ev-tb-group {
+	display: flex;
+	align-items: center;
+	gap: 1px;
+	flex-shrink: 0;
+}
+
+.ev-tb-sep {
+	flex-shrink: 0;
+	width: 1px;
+	height: 18px;
+	background: var(--ev-header-border);
+	margin: 0 4px;
+}
+
+// ── Toolbar buttons ────────────────────────────────────────────────────────────
+
+.ev-tb-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	flex-direction: column;
+	min-width: 26px;
+	height: 26px;
+	padding: 0 5px;
+	border: 1px solid transparent;
+	border-radius: 3px;
+	background: transparent;
+	cursor: pointer;
+	font-size: 12px;
+	font-family: var(--ev-font);
+	color: var(--ev-text);
+	line-height: 1;
+	gap: 1px;
+	transition: background 0.1s, border-color 0.1s;
+
+	b { font-weight: 900; font-style: normal; }
+	i { font-style: italic; font-weight: 700; }
+
+	&:hover {
+		background: rgba(0, 0, 0, 0.07);
+		border-color: var(--ev-header-border);
+	}
+
+	&.ev-active {
+		background: rgba(18, 100, 163, 0.12);
+		border-color: var(--ev-sel-border);
+		color: var(--ev-sel-border);
+	}
+}
+
+.ev-btn-underline { text-decoration: underline; }
+.ev-btn-strike    { text-decoration: line-through; }
+
+// ── Toolbar dropdowns ──────────────────────────────────────────────────────────
+
+.ev-tb-select {
+	height: 26px;
+	padding: 0 4px;
+	border: 1px solid var(--ev-header-border);
+	border-radius: 3px;
+	background: var(--ev-fb-bg);
+	color: var(--ev-text);
+	font-size: 11px;
+	font-family: var(--ev-font);
+	cursor: pointer;
+
+	&:focus {
+		outline: none;
+		border-color: var(--ev-sel-border);
+	}
+}
+
+.ev-tb-font-family { width: 110px; }
+.ev-tb-font-size   { width: 46px; }
+
+// ── Color buttons ──────────────────────────────────────────────────────────────
+
+.ev-color-trigger {
+	height: 28px;
+	padding: 2px 5px;
+	gap: 1px;
+}
+
+.ev-tb-color-icon {
+	font-size: 13px;
+	font-weight: 700;
+	line-height: 1;
+}
+
+.ev-bucket { font-size: 14px; }
+
+.ev-tb-color-bar {
+	display: block;
+	width: 16px;
+	height: 3px;
+	border-radius: 1px;
+}
+
+// ── Alignment icons (CSS-drawn lines) ─────────────────────────────────────────
+
+.ev-align-icon {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	width: 14px;
+
+	&::before,
+	&::after {
+		content: "";
+		display: block;
+		height: 2px;
+		background: currentColor;
+		border-radius: 1px;
+	}
+
+	&::before { width: 100%; }
+
+	&.ev-align-left   { &::after { width: 60%; } }
+	&.ev-align-center { align-items: center; &::after { width: 60%; } }
+	&.ev-align-right  { align-items: flex-end; &::after { width: 60%; } }
+}
+
+.ev-wrap-icon { font-size: 14px; }
+
+// ── Color palette popup ────────────────────────────────────────────────────────
+
+.ev-palette-popup {
+	position: absolute;
+	z-index: 1100;
+	background: var(--ev-cell-bg);
+	border: 1px solid var(--ev-header-border);
+	border-radius: 4px;
+	box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+	padding: 8px;
+
+	&.hide { display: none; }
+}
+
+.ev-palette-grid {
+	display: grid;
+	grid-template-columns: repeat(10, 18px);
+	gap: 2px;
+	margin-bottom: 8px;
+}
+
+.ev-swatch {
+	display: block;
+	width: 18px;
+	height: 18px;
+	border: 1px solid rgba(0, 0, 0, 0.18);
+	border-radius: 2px;
+	cursor: pointer;
+	transition: transform 0.1s;
+	position: relative;
+
+	&:hover {
+		transform: scale(1.25);
+		border-color: var(--ev-sel-border);
+		z-index: 1;
+	}
+}
+
+.ev-palette-custom {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding-top: 6px;
+	border-top: 1px solid var(--ev-grid-line);
+	font-size: 11px;
+	color: var(--ev-text-muted);
+}
+
+.ev-custom-color {
+	width: 28px;
+	height: 22px;
+	padding: 1px;
+	border: 1px solid var(--ev-header-border);
+	border-radius: 3px;
+	cursor: pointer;
+}
+
+// ── Column headers: Excel letter + field name ──────────────────────────────────
+// A small gray column letter (A, B, C…) is shown above the field label so
+// users can reference columns in formulas like =SUM(B1:B10).
+
+.ev-page .handsontable {
+	thead th,
+	.htColHeader,
+	.ht_clone_top th,
+	.ht_clone_top .htColHeader {
+		height: 40px !important;
+		padding: 0 !important;
+		vertical-align: middle;
+	}
+}
+
+.ev-col-header {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	height: 100%;
+	padding: 2px 4px;
+	gap: 1px;
+	line-height: 1;
+}
+
+.ev-col-letter {
+	font-size: 9px;
+	color: var(--ev-text-muted);
+	font-weight: 400;
+}
+
+.ev-col-name {
+	font-size: 11px;
+	font-weight: 600;
+	color: var(--ev-header-text);
+}
+
+// ── AutoFilter dropdown button ─────────────────────────────────────────────────
+// HOT's dropdownMenu plugin injects a .changeType button into each <th>.
+// By default HOT hides it (opacity:0) and only shows it on :hover.
+// We override that so the ▼ is always visible on every column header.
+
+.ev-page .handsontable {
+	// HOT's .relative div inside <th> has overflow:hidden by default.
+	// This clips the absolutely-positioned .changeType ▼ button.
+	// Fix: make .relative fill the full header height and allow overflow.
+	thead th .relative,
+	.ht_clone_top thead th .relative {
+		height: 100% !important;
+		overflow: visible !important;
+	}
+
+	// The .changeType button is HOT's ▼ dropdown trigger.
+	// HOT CSS: opacity:0 by default, opacity:1 on th:hover.
+	// We force it always visible, repositioned for our 40px two-line headers.
+	thead th .relative .changeType {
+		opacity: 1 !important;
+		visibility: visible !important;
+		transform: none !important;       // cancel HOT's translateY(-50%)
+		position: absolute !important;
+		top: 4px !important;
+		right: 2px !important;
+		width: 14px !important;
+		height: 14px !important;
+		font-size: 9px !important;
+		line-height: 14px !important;
+		text-align: center;
+		background: transparent !important;
+		border: none !important;
+		border-radius: 2px !important;
+		color: var(--ev-text-muted) !important;
+		cursor: pointer;
+		z-index: 20;
+		padding: 0 !important;
+
+		&:hover {
+			color: var(--ev-sel-border) !important;
+			background: rgba(18, 100, 163, 0.12) !important;
+		}
+	}
+
+	// Filter active: blue tint on column header when filter is applied
+	.ht_clone_top th.htFiltersActive {
+		background: #dbeafe !important;
+		.ev-col-letter { color: var(--ev-sel-border); }
+		.ev-col-name   { color: var(--ev-sel-border); }
+		.changeType    { color: var(--ev-sel-border) !important; }
+	}
+
+	// The filter/sort dropdown panel — must float above HOT overlay clones
+	.htDropdownMenu,
+	.htFiltersConditionMenu {
+		z-index: 1500 !important;
+
+		table.htCore td {
+			font-size: 12px;
+			font-family: var(--ev-font);
+		}
+	}
+}
+
+// ── Page-head z-index fix ─────────────────────────────────────────────────────
+// When Excel View is active, .page-head (normally z-index: 6, position: sticky)
+// must be raised above HOT overlay clone containers (z-index: 101-106).
+// Without this, HOT clones paint over the view-switcher dropdown, clipping it.
+
+.ev-page-active {
+	z-index: 200 !important;
+}
+
+// ── Formula help popup ────────────────────────────────────────────────────────
+// Appears below the formula bar when the fx button is clicked.
+// Shows common formula examples in a 2-column grid; click to insert.
+
+.ev-formula-help-popup {
+	position: absolute;
+	top: 100%; // flush below the formula-bar-outer div
+	left: 0;
+	z-index: 1200;
+	background: var(--ev-cell-bg);
+	border: 1px solid var(--ev-header-border);
+	border-radius: 6px;
+	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
+	width: 700px;
+	max-width: calc(100vw - 32px);
+	font-family: var(--ev-font);
+
+	&.hide { display: none; }
+}
+
+.ev-fh-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 10px 14px 8px;
+	border-bottom: 1px solid var(--ev-header-border);
+	background: var(--ev-header-bg);
+	border-radius: 6px 6px 0 0;
+}
+
+.ev-fh-title {
+	font-size: 13px;
+	font-weight: 600;
+	color: var(--ev-text);
+}
+
+.ev-fh-close {
+	background: none;
+	border: none;
+	font-size: 20px;
+	line-height: 1;
+	cursor: pointer;
+	color: var(--ev-text-muted);
+	padding: 0 4px;
+
+	&:hover { color: var(--ev-text); }
+}
+
+.ev-fh-body {
+	padding: 12px 14px;
+	max-height: 360px;
+	overflow-y: auto;
+}
+
+.ev-fh-grid {
+	display: grid;
+	grid-template-columns: repeat(2, 1fr);
+	gap: 14px 20px;
+}
+
+.ev-fh-category {
+	font-size: 10px;
+	font-weight: 700;
+	color: var(--ev-green);
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	margin-bottom: 5px;
+	padding-bottom: 4px;
+	border-bottom: 1px solid var(--ev-green-light);
+}
+
+.ev-fh-row {
+	display: flex;
+	align-items: baseline;
+	gap: 8px;
+	padding: 3px 5px;
+	border-radius: 3px;
+	cursor: pointer;
+
+	&:hover { background: var(--ev-green-light); }
+}
+
+.ev-fh-formula {
+	font-family: var(--ev-font-mono);
+	font-size: 11px;
+	color: var(--ev-green-dark);
+	background: none;
+	padding: 0;
+	white-space: nowrap;
+	flex-shrink: 0;
+	min-width: 175px;
+}
+
+.ev-fh-desc {
+	font-size: 11px;
+	color: var(--ev-text-muted);
+}
+
+.ev-fh-tip {
+	margin-top: 10px;
+	padding: 7px 10px;
+	background: var(--ev-green-light);
+	border-radius: 4px;
+	font-size: 11px;
+	color: var(--ev-green-dark);
+	border-left: 3px solid var(--ev-green);
+}
+
+// ── Dark mode ─────────────────────────────────────────────────────────────────
+// Dark mode is already working — preserve it as-is.
+
+[data-theme="dark"] .ev-page {
+	--ev-header-bg:     #2d2d2d;
+	--ev-header-text:   #a0a0a0;
+	--ev-header-border: #444444;
+	--ev-grid-line:     #3a3a3a;
+	--ev-cell-bg:       #1e1e1e;
+	--ev-text:          #d4d4d4;
+	--ev-text-muted:    #737373;
+	--ev-dimmed-bg:     #252525;
+	--ev-dimmed-text:   #666666;
+	--ev-fb-bg:         #1e1e1e;
+	--ev-fb-border:     #444444;
+	--ev-sel-range:     rgba(18, 100, 163, 0.18);
+}
+
+[data-theme="dark"] {
+	.ev-toolbar {
+		background: #2d2d2d;
+		border-color: #444;
+	}
+
+	.ev-tb-select {
+		background: #1e1e1e;
+		border-color: #444;
+		color: #d4d4d4;
+	}
+
+	.ev-tb-btn {
+		color: #d4d4d4;
+		&:hover { background: rgba(255, 255, 255, 0.08); border-color: #555; }
+		&.ev-active { background: rgba(18, 100, 163, 0.22); border-color: #1264a3; color: #4fc1e9; }
+	}
+
+	.ev-palette-popup { background: #252525; border-color: #444; }
+
+	.ev-formula-help-popup {
+		background: #1e1e1e;
+		border-color: #444;
+	}
+
+	.ev-fh-header { background: #2d2d2d; border-color: #444; }
+	.ev-fh-title { color: #d4d4d4; }
+	.ev-fh-close { color: #737373; &:hover { color: #d4d4d4; } }
+	.ev-fh-formula { color: #4ec9b0; }
+	.ev-fh-row:hover { background: #1d3829; }
+	.ev-fh-tip { background: #1d3829; color: #4ec9b0; border-color: #4ec9b0; }
+	.ev-fh-category { border-color: #1d3829; }
+
+	.ev-formula-bar {
+		.ev-fx-icon {
+			color: #4ec9b0;
+			sub { color: #4ec9b0; }
+		}
+	}
+
+	.ev-page .handsontable {
+		td.ev-name-col {
+			color: #4ec9b0;
+		}
+
+		.ev-link-cell {
+			color: #4ec9b0;
+		}
+
+		tbody tr:hover td:not(.current):not(.area) {
+			background: #262626 !important;
+		}
+
+		.ht_clone_top .htColHeader.ht__active_highlight {
+			background: #1d3829 !important;
+			color: #4ec9b0 !important;
+		}
+
+		.ht_clone_left th.ht__active_highlight {
+			background: #1d3829 !important;
+			color: #4ec9b0 !important;
+		}
+	}
+
+	.ev-link-dropdown {
+		background: #1e1e1e;
+		border-color: #444;
+
+		.ev-link-option {
+			color: #d4d4d4;
+			border-color: #2d2d2d;
+
+			&:hover {
+				background: #1d3829;
+				color: #4ec9b0;
+			}
+		}
+	}
+}
