@@ -67,6 +67,7 @@ import "./components/data_manager.js";
 import "./components/column_manager.js";
 import "./components/formula_bar.js";
 import "./components/toolbar.js";
+import "./components/field_picker.js";
 import "./components/excel_board.js";
 
 // ── 5. Signal that deps are ready ─────────────────────────────────────────────

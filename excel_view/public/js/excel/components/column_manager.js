@@ -50,6 +50,15 @@ frappe.views.excel.ColumnManager = class ColumnManager {
 
 			const col_config = frappe.views.excel.get_column_config(df, this.can_write);
 			col_config.width = this._widths[fieldname] || this._default_width(df);
+
+			// docstatus: always read-only, render as badge (handled in afterRenderer)
+			if (fieldname === "docstatus") {
+				col_config.readOnly = true;
+				col_config._readonly = true;
+				col_config._is_docstatus = true;
+				col_config.className = "htDimmed htCenter";
+			}
+
 			columns.push(col_config);
 		});
 

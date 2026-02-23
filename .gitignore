@@ -4,6 +4,7 @@
 *.swp
 tags
 node_modules
+excel_view/public/dist/
 __pycache__
 docs/
 roadmap/

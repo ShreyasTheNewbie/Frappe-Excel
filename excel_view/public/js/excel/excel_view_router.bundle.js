@@ -126,14 +126,86 @@ frappe.views.ExcelView = class ExcelView extends frappe.views.ListView {
 			"Table", "Table MultiSelect",
 			"Password",
 		]);
-		const fields = [["name", this.doctype]];
-		(this.meta?.fields || []).forEach((df) => {
-			if (SKIP_TYPES.has(df.fieldtype)) return;
-			if (df.fieldname === "name") return;
-			if (df.is_virtual) return;
-			fields.push([df.fieldname, this.doctype]);
+
+		// ── RBAC: only expose fields the current user can read ────────────────
+		const perms = frappe.perm.get_perm(this.doctype) || [];
+		const readable_permlevels = new Set(
+			perms.filter(p => p.read).map(p => p.permlevel || 0)
+		);
+		const can_read = (df) => readable_permlevels.has(df.permlevel || 0);
+
+		// System fields that are never useful as grid columns:
+		// - docstatus: we show Status field which is human-readable
+		// - idx: internal sort index, meaningless to users
+		const ALWAYS_SKIP_FIELDS = new Set(["docstatus", "idx"]);
+
+		// Label map for alphabetical sort (ID stays pinned at position 0)
+		const label_map = {};
+		(this.meta?.fields || []).forEach(df => {
+			label_map[df.fieldname] = df.label || df.fieldname;
 		});
-		return fields;
+		const by_label = (a, b) =>
+			(__(label_map[a[0]] || a[0])).localeCompare(__(label_map[b[0]] || b[0]));
+
+		const sort_fields = (arr) => {
+			const name_entry = arr.shift(); // "name" always first
+			arr.sort(by_label);
+			arr.unshift(name_entry);
+			return arr;
+		};
+
+		// ── Check for a previously saved column selection ─────────────────────
+		const saved_columns = frappe.get_user_settings(this.doctype)?.excel_columns;
+
+		if (Array.isArray(saved_columns) && saved_columns.length) {
+			const valid = new Set(
+				(this.meta?.fields || [])
+					.filter(df =>
+						!SKIP_TYPES.has(df.fieldtype) &&
+						!ALWAYS_SKIP_FIELDS.has(df.fieldname) &&
+						!df.is_virtual &&
+						can_read(df)
+					)
+					.map(df => df.fieldname)
+			);
+			valid.add("name");
+
+			const filtered = saved_columns.filter(f => valid.has(f));
+			if (filtered.length) {
+				// Preserve user's saved order (set via drag-to-reorder in field picker).
+				// Drop any fields that no longer exist, are restricted, or always-skipped.
+				return filtered.map(f => [f, this.doctype]);
+			}
+		}
+
+		// Reuse ALWAYS_SKIP_FIELDS for the default path too
+		const DEFAULT_SKIP_FIELDS = ALWAYS_SKIP_FIELDS;
+
+		// ── Default: in_list_view === 1 fields (same logic as List/Report View) ─
+		const fields = [["name", this.doctype]];
+		(this.meta?.fields || []).forEach(df => {
+			if (SKIP_TYPES.has(df.fieldtype)) return;
+			if (df.fieldname === "name" || df.is_virtual) return;
+			if (!can_read(df)) return;
+			if (DEFAULT_SKIP_FIELDS.has(df.fieldname)) return;
+			if (df.in_list_view) fields.push([df.fieldname, this.doctype]);
+		});
+
+		// ── Fallback: if no in_list_view fields defined, take first 10 readable ─
+		if (fields.length === 1) {
+			let count = 0;
+			(this.meta?.fields || []).forEach(df => {
+				if (count >= 10) return;
+				if (SKIP_TYPES.has(df.fieldtype)) return;
+				if (df.fieldname === "name" || df.is_virtual) return;
+				if (!can_read(df)) return;
+				if (DEFAULT_SKIP_FIELDS.has(df.fieldname)) return;
+				fields.push([df.fieldname, this.doctype]);
+				count++;
+			});
+		}
+
+		return sort_fields(fields);
 	}
 
 	// ── Page / View setup ────────────────────────────────────────────────────
@@ -232,9 +304,7 @@ frappe.views.ExcelView = class ExcelView extends frappe.views.ListView {
 
 	toggle_side_bar() {
 		super.toggle_side_bar();
-		requestAnimationFrame(() => {
-			this.excel_board?.resize();
-		});
+		// ResizeObserver on the grid wrapper handles the re-render automatically.
 	}
 
 	// ── Cleanup ──────────────────────────────────────────────────────────────

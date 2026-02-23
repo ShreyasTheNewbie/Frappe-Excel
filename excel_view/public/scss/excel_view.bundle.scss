@@ -901,3 +901,242 @@
 		}
 	}
 }
+
+// ── docstatus badge ───────────────────────────────────────────────────────────
+
+.ev-doc-status {
+	display: inline-block;
+	padding: 2px 8px;
+	border-radius: 10px;
+	font-size: 11px;
+	font-weight: 600;
+	letter-spacing: 0.3px;
+	line-height: 1.6;
+}
+
+.ev-doc-draft     { background: #f1f5f9; color: #475569; }
+.ev-doc-submitted { background: #dcfce7; color: #15803d; }
+.ev-doc-cancelled { background: #fee2e2; color: #b91c1c; }
+
+[data-theme="dark"] {
+	.ev-doc-draft     { background: #1e293b; color: #94a3b8; }
+	.ev-doc-submitted { background: #14532d; color: #86efac; }
+	.ev-doc-cancelled { background: #450a0a; color: #fca5a5; }
+}
+
+// ── Toolbar: Choose Columns button ────────────────────────────────────────────
+
+.ev-columns-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 28px;
+	height: 26px;
+	padding: 0;
+	color: var(--ev-green, #1d6f42);
+	border: 1px solid var(--ev-green, #1d6f42);
+	border-radius: 3px;
+	background: transparent;
+	cursor: pointer;
+
+	&:hover { background: var(--ev-green-light, #e2efda); }
+
+	svg { flex-shrink: 0; }
+}
+
+// ── Field Picker: Apply button (Excel green override) ─────────────────────────
+
+.ev-fp-apply-btn {
+	background-color: #1d6f42 !important;
+	border-color: #1d6f42 !important;
+
+	&:hover, &:focus {
+		background-color: #185c37 !important;
+		border-color: #185c37 !important;
+	}
+}
+
+// ── Field Picker dialog ───────────────────────────────────────────────────────
+
+.ev-fp-body {
+	padding: 0 2px;
+
+	// Search bar + count in one row
+	.ev-fp-toolbar {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		margin-bottom: 6px;
+
+		.ev-fp-search { flex: 1; font-size: 13px; }
+
+		.ev-fp-count {
+			flex-shrink: 0;
+			font-size: 11px;
+			color: var(--text-muted);
+			white-space: nowrap;
+		}
+	}
+
+	// Select all / deselect all + hint
+	.ev-fp-actions {
+		display: flex;
+		align-items: center;
+		gap: 4px;
+		margin-bottom: 6px;
+		font-size: 12px;
+
+		a {
+			cursor: pointer;
+			color: var(--ev-green, #1d6f42);
+			text-decoration: none;
+			&:hover { text-decoration: underline; }
+		}
+
+		.ev-fp-hint {
+			margin-left: auto;
+			color: var(--text-muted);
+			font-size: 11px;
+		}
+	}
+
+	// Scrollable list
+	.ev-fp-list {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		max-height: 380px;
+		overflow-y: auto;
+		border: 1px solid var(--border-color, #d1d5db);
+		border-radius: 4px;
+	}
+
+	// Individual field row
+	.ev-fp-item {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 6px 10px;
+		border-bottom: 1px solid var(--border-color, #f0f0f0);
+		cursor: default;
+		-webkit-user-select: none;
+		user-select: none;
+
+		&:last-child { border-bottom: none; }
+
+		&:hover:not(.ev-fp-locked) { background: var(--bg-light-gray, #f8f9fa); }
+
+		// Locked row (ID column)
+		&.ev-fp-locked {
+			background: var(--bg-light-gray, #f8f9fa);
+			opacity: 0.75;
+		}
+
+		// Dragging state
+		&.ev-fp-dragging {
+			opacity: 0.4;
+		}
+
+		// Drop target highlight
+		&.ev-fp-drag-over {
+			border-top: 2px solid var(--ev-green, #1d6f42);
+		}
+	}
+
+	// Drag handle
+	.ev-fp-drag {
+		font-size: 14px;
+		color: var(--text-muted);
+		cursor: grab;
+		flex-shrink: 0;
+		line-height: 1;
+
+		&:active { cursor: grabbing; }
+	}
+	.ev-fp-drag-disabled {
+		@extend .ev-fp-drag;
+		cursor: default;
+		opacity: 0.3;
+	}
+
+	// Label + checkbox row (takes remaining width)
+	.ev-fp-label-wrap {
+		display: flex;
+		align-items: center;
+		gap: 7px;
+		flex: 1;
+		cursor: pointer;
+		margin: 0;
+
+		.ev-fp-check {
+			flex-shrink: 0;
+			cursor: pointer;
+			accent-color: #1d6f42; // Excel green checkboxes
+			width: 14px;
+			height: 14px;
+		}
+
+		.ev-fp-label {
+			flex: 1;
+			font-size: 13px;
+			color: var(--text-color, #1a1a1a);
+		}
+	}
+
+	// Type + Custom badges
+	.ev-fp-badge {
+		flex-shrink: 0;
+		font-size: 10px;
+		padding: 1px 5px;
+		border-radius: 10px;
+		font-weight: 500;
+		letter-spacing: 0.2px;
+	}
+
+	.ev-fp-custom {
+		background: #fff3cd;
+		color: #856404;
+	}
+
+	// Field-type colour coding — muted, Excel-professional palette
+	.ev-ft-num    { background: #e8f0fe; color: #1a56c4; } // blue  — numeric
+	.ev-ft-date   { background: #fef3c7; color: #92400e; } // amber — date/time
+	.ev-ft-link   { background: #e2efda; color: #1d6f42; } // Excel green — links
+	.ev-ft-select { background: #ede9fe; color: #4c1d95; } // violet — select
+	.ev-ft-check  { background: #fde8e8; color: #b91c1c; } // red — boolean
+	.ev-ft-data   { background: #f1f5f9; color: #475569; } // slate — text
+	.ev-ft-other  { background: #f1f5f9; color: #64748b; } // slate — other
+}
+
+// ── Dark mode overrides for field picker ──────────────────────────────────────
+
+[data-theme="dark"] {
+	.ev-fp-body {
+		.ev-fp-list { border-color: #444; }
+
+		.ev-fp-item {
+			border-bottom-color: #333;
+			&:hover:not(.ev-fp-locked) { background: #2a2a2a; }
+			&.ev-fp-locked { background: #222; }
+			&.ev-fp-drag-over { border-top-color: #4ec9b0; }
+		}
+
+		.ev-fp-label-wrap .ev-fp-label { color: #d4d4d4; }
+
+		.ev-ft-num    { background: #1e3a5f; color: #93c5fd; }
+		.ev-ft-date   { background: #4a0d2c; color: #f9a8d4; }
+		.ev-ft-link   { background: #064e3b; color: #6ee7b7; }
+		.ev-ft-select { background: #2e1065; color: #c4b5fd; }
+		.ev-ft-check  { background: #450a0a; color: #fca5a5; }
+		.ev-ft-data   { background: #1f2937; color: #9ca3af; }
+		.ev-ft-other  { background: #1f2937; color: #6b7280; }
+
+		.ev-fp-custom { background: #422006; color: #fcd34d; }
+
+		.ev-columns-btn {
+			color: #4ec9b0;
+			border-color: #4ec9b0;
+			&:hover { background: #1d3829; }
+		}
+	}
+}

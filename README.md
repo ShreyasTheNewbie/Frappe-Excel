@@ -25,7 +25,14 @@ A full spreadsheet experience built into Frappe — edit, format, and analyze an
 cd $PATH_TO_YOUR_BENCH
 bench get-app $URL_OF_THIS_REPO
 bench install-app excel_view
-bench build --app excel_view
+# bench install-app automatically runs bench build — no manual step needed
+```
+
+### Updating
+
+```bash
+cd apps/excel_view && git pull
+bench build --app excel_view   # required after every pull (dist files are not committed)
 ```
 
 ---
@@ -33,8 +40,25 @@ bench build --app excel_view
 ## Release Notes
 
 ### v2.0 — Current (Feb 2026)
-- **Lazy loading** — Split into two bundles: a 4KB router bundle (loads on every page) and a 1.6MB deps bundle (loads only when Excel View is opened). No performance cost for users who don't use Excel View.
+
+**Performance**
+- **Lazy loading** — Split into two bundles: a 4KB router bundle (loads on every page) and a 1.6MB deps bundle (loads only when Excel View is opened). Zero cost for users who don't open Excel View.
 - **Asset manifest resolution** — Uses `frappe.boot.assets_json` to correctly resolve content-hashed bundle URLs.
+
+**Field Picker — "Choose Columns" dialog**
+- Select which DocType fields to display in the grid
+- Live search by label or fieldname
+- Drag-to-reorder columns (order persists across sessions)
+- Select All / Deselect All (scoped to visible/filtered rows)
+- RBAC-aware — only shows fields the logged-in user has read permission for (respects `permlevel`)
+- Column config saved server-side per user per DocType via `frappe.model.user_settings` (survives browser clear)
+- Default columns: `in_list_view` fields sorted A→Z; user's saved order respected on subsequent loads
+- `docstatus` and `idx` permanently excluded (use Status field for document state)
+
+**Grid refinements**
+- Columns default sorted A→Z by label for any DocType
+- `ResizeObserver` on grid wrapper — auto re-renders on sidebar toggle, panel resize, window resize
+- Column widths persist per user per DocType
 
 ### v1.0 — Initial Release
 - Full spreadsheet grid for any DocType
@@ -52,7 +76,6 @@ bench build --app excel_view
 ## Upcoming
 
 ### v2.0 (in progress)
-- **Field picker** — "Choose Columns" dialog to select which DocType fields to show, with drag-to-reorder. Column config saved server-side per user per DocType via `frappe.model.user_settings`.
 - **Toolbar wiring** — All formatting buttons fully wired to range selections
 - **Rich color palette** — Excel-style 3-section palette (theme colors, standard colors, recent colors)
 
