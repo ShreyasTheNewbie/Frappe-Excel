@@ -47,6 +47,19 @@ frappe.views.excel.ExcelToolbar = class ExcelToolbar {
 
 		$(this.wrapper).html(`
 			<div class="ev-toolbar">
+				<!-- Choose Columns -->
+				<div class="ev-tb-group">
+					<button class="ev-tb-btn ev-columns-btn" title="${__("Choose Columns")}">
+						<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+							<rect x="1" y="1" width="4" height="14" rx="1"/>
+							<rect x="6" y="1" width="4" height="14" rx="1"/>
+							<rect x="11" y="1" width="4" height="14" rx="1"/>
+						</svg>
+					</button>
+				</div>
+
+				<div class="ev-tb-sep"></div>
+
 				<!-- Font family -->
 				<div class="ev-tb-group">
 					<select class="ev-tb-select ev-tb-font-family" title="${__("Font")}">
@@ -163,6 +176,11 @@ frappe.views.excel.ExcelToolbar = class ExcelToolbar {
 	}
 
 	_bind_events() {
+		// Choose Columns button
+		this.$toolbar.on("click", ".ev-columns-btn", () => {
+			this.board.open_field_picker();
+		});
+
 		// Format toggle buttons (bold, italic, underline, strike, alignment, wrap)
 		this.$toolbar.on("click", ".ev-fmt-btn", (e) => {
 			const fmt = $(e.currentTarget).data("fmt");

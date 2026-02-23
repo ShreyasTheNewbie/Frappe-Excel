@@ -97,6 +97,13 @@ frappe.views.ExcelBoard = class ExcelBoard {
 		this.$wrapper.empty().addClass("ev-grid-wrapper");
 
 		this.$hot_container = $('<div class="ev-hot-container">').appendTo(this.$wrapper);
+
+		// ResizeObserver — fires whenever the wrapper changes size (sidebar toggle,
+		// window resize, panel open/close). Debounced so rapid events don't pile up.
+		this._resize_observer = new ResizeObserver(
+			frappe.utils.debounce(() => { this.hot?.render(); }, 60)
+		);
+		this._resize_observer.observe(this.$wrapper[0]);
 	}
 
 	_init_hot() {
@@ -184,6 +191,21 @@ frappe.views.ExcelBoard = class ExcelBoard {
 	 * Called by HOT's afterRenderer hook after each cell is drawn.
 	 */
 	_apply_cell_format(TD, row, col, value) {
+		// docstatus: render 0/1/2 as a coloured badge instead of raw number
+		if (this.columns[col]?._is_docstatus) {
+			const v = parseInt(value, 10);
+			const map = [
+				{ label: "Draft",     cls: "ev-doc-draft"     },
+				{ label: "Submitted", cls: "ev-doc-submitted"  },
+				{ label: "Cancelled", cls: "ev-doc-cancelled"  },
+			];
+			const entry = map[v];
+			TD.innerHTML = entry
+				? `<span class="ev-doc-status ${entry.cls}">${__(entry.label)}</span>`
+				: String(value ?? "");
+			return;
+		}
+
 		// Formula display: replace raw formula string with the HyperFormula-computed result.
 		// HOT stores the literal "=SUM(B1:B3)" string; we swap it with the evaluated value.
 		if (this.formula_bridge?.is_formula(value)) {
@@ -576,6 +598,41 @@ frappe.views.ExcelBoard = class ExcelBoard {
 		);
 	}
 
+	// ── Field picker ──────────────────────────────────────────────────────────
+
+	/**
+	 * Open the "Choose Columns" dialog.
+	 */
+	open_field_picker() {
+		new frappe.views.excel.FieldPicker({ board: this }).open();
+	}
+
+	/**
+	 * Apply a new column selection from the field picker.
+	 * @param {string[]} fieldnames - ordered array, always starts with "name"
+	 */
+	apply_field_selection(fieldnames) {
+		// Rebuild column_manager's field list (name is added automatically by get_columns)
+		this.column_manager.fields = fieldnames
+			.filter(f => f !== "name")
+			.map(f => [f, this.doctype]);
+
+		// Recompute columns + master list; clear any hidden-column state
+		this.columns = this.column_manager.get_columns();
+		this._master_columns = [...this.columns];
+		this._hidden_col_keys.clear();
+
+		// Rebuild HyperFormula matrix with the new column set
+		this.matrix = this.data_manager.to_matrix(this.list_view.data, this.columns);
+		this.formula_bridge.reload(this.matrix);
+
+		// Push updated column config to HOT and re-render
+		this.hot.updateSettings({ columns: this.columns });
+		this.hot.render();
+
+		frappe.show_alert({ message: __("Columns updated"), indicator: "green" }, 2);
+	}
+
 	// ── Public API ────────────────────────────────────────────────────────────
 
 	/**
@@ -601,6 +658,7 @@ frappe.views.ExcelBoard = class ExcelBoard {
 	 */
 	destroy() {
 		$(document).off("keydown.ev");
+		this._resize_observer?.disconnect();
 		this.toolbar_component?.destroy();
 		this.formula_bar_component?.destroy();
 		this.hot?.destroy();
