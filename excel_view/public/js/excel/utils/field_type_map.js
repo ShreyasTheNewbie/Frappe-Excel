@@ -9,6 +9,23 @@
 frappe.provide("frappe.views.excel");
 
 /**
+ * Fieldnames that are always read-only in the grid.
+ *
+ * Derived from `frappe.model.std_fields` — the authoritative client-side list
+ * of Frappe system fields (owner, creation, modified, modified_by, idx, etc.).
+ * User-editable system fields (Tags, Assigned To, Comments) are excluded.
+ *
+ * This avoids hardcoding fieldnames — if Frappe adds a new system field it is
+ * automatically picked up here.
+ */
+const _USER_EDITABLE_STD = new Set(["_user_tags", "_assign", "_liked_by", "_comments", "_seen"]);
+const READONLY_FIELDNAMES = new Set(
+	(frappe.model.std_fields || [])
+		.map((f) => f.fieldname)
+		.filter((name) => !_USER_EDITABLE_STD.has(name))
+);
+
+/**
  * Fieldtypes that are always read-only in the grid (system-managed).
  */
 const READONLY_TYPES = new Set([
@@ -44,7 +61,9 @@ const READONLY_TYPES = new Set([
  * @returns {Object}    - HOT column config object
  */
 frappe.views.excel.get_column_config = function (df, can_write) {
-	const read_only = !can_write || df.read_only || READONLY_TYPES.has(df.fieldtype);
+	const read_only = !can_write || df.read_only
+		|| READONLY_TYPES.has(df.fieldtype)
+		|| READONLY_FIELDNAMES.has(df.fieldname);
 
 	const base = {
 		data: df.fieldname,

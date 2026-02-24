@@ -150,4 +150,25 @@ frappe.views.excel.ColumnManager = class ColumnManager {
 		const settings = frappe.get_user_settings(this.meta.name);
 		return settings?.excel_view_col_widths || {};
 	}
+
+	/**
+	 * Persist freeze column count to user settings.
+	 * @param {number} n - number of columns frozen (0 = unfrozen)
+	 */
+	save_freeze(n) {
+		frappe.model.user_settings.save(
+			this.meta.name,
+			"excel_view_freeze",
+			n
+		);
+	}
+
+	/**
+	 * Load persisted freeze column count from user settings.
+	 * @returns {number}
+	 */
+	load_freeze() {
+		const settings = frappe.get_user_settings(this.meta.name);
+		return settings?.excel_view_freeze || 0;
+	}
 };

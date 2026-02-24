@@ -159,7 +159,33 @@ frappe.views.excel.ContextMenu = class ContextMenu {
 
 				sep4b: "---------",
 
-				// ── Formula column ────────────────────────────────────────────
+				// ── Column freeze ─────────────────────────────────────────────
+				freeze_col: {
+					name: () => {
+						const sel = board.hot.getSelected();
+						if (!sel?.length) return __("Freeze up to this column");
+						const col = Math.max(sel[0][1], sel[0][3]);
+						const label = board.columns[col]?.title || board._col_idx_to_letter(col);
+						return __("Freeze up to column: {0}", [label]);
+					},
+					callback: (key, selection) => {
+						const col = Math.max(
+							selection[0].start.col,
+							selection[0].end.col
+						);
+						board._set_freeze(col + 1);
+					},
+				},
+
+				unfreeze_cols: {
+					name: () => __("Unfreeze columns"),
+					callback: () => board._set_freeze(0),
+					disabled: () => !board._frozen_cols,
+				},
+
+				sep4c: "---------",
+
+				// ── Formula column ─────────────────────────────────────────────
 				add_formula_col: {
 					name: () => __("Add formula column"),
 					callback: () => board._add_formula_column(),
