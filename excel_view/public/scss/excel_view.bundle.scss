@@ -1484,13 +1484,30 @@
 	}
 }
 
+// ── Column freeze boundary ────────────────────────────────────────────────────
+// HOT always creates .ht_clone_left even with no frozen data columns (it holds
+// the row-number headers). Only apply the freeze style when columns are
+// actually frozen — toggled via .ev-cols-frozen on the container.
+// Google Sheets style: thin neutral border + soft drop shadow (no harsh colour).
+
+.ev-cols-frozen .ht_clone_left {
+	border-right: 1px solid rgba(0, 0, 0, 0.20) !important;
+	box-shadow: 4px 0 12px rgba(0, 0, 0, 0.13), 1px 0 4px rgba(0, 0, 0, 0.07);
+}
+
+[data-theme="dark"] .ev-cols-frozen .ht_clone_left {
+	border-right: 1px solid rgba(255, 255, 255, 0.10) !important;
+	box-shadow: 4px 0 12px rgba(0, 0, 0, 0.45), 1px 0 4px rgba(0, 0, 0, 0.30);
+}
+
 // ── HOT scrollbars — always visible, styled like Excel ────────────────────────
 // HOT 6.x uses native browser scrollbars on .ht_master .wtHolder.
-// Override default thin/invisible overlay scrollbars.
+// scrollbar-color track must be opaque — Chrome 121+ transparent track lets
+// cell content bleed through into the scrollbar gutter.
 
 .ev-page .handsontable .ht_master .wtHolder {
 	scrollbar-width: thin;
-	scrollbar-color: #b0b0b0 transparent;
+	scrollbar-color: #b0b0b0 var(--ev-header-bg);
 
 	&::-webkit-scrollbar {
 		height: 9px;
@@ -1519,6 +1536,152 @@
 		border-color: #2d2d2d;
 		&:hover { background: #777; }
 	}
+}
+
+// ── Find & Replace floating panel ────────────────────────────────────────────
+// Non-modal fixed panel that floats over the grid (top-right).
+// Visible only when .ev-fnr-visible is toggled on by _show_find_replace().
+
+.ev-fnr-panel {
+	display: none;
+	position: fixed;
+	// Default: horizontally centred, below the page toolbar.
+	// JS drag overrides left/top inline; right is cleared to "auto".
+	top: 140px;
+	left: calc(50vw - 170px);
+	right: auto;
+	z-index: 1055;
+	width: 340px;
+	background: var(--bg-color, #fff);
+	border: 1px solid var(--border-color, #d1d8dd);
+	border-radius: 6px;
+	box-shadow: 0 6px 24px rgba(0, 0, 0, 0.14), 0 2px 8px rgba(0, 0, 0, 0.08);
+	padding: 12px 14px 14px;
+	font-size: 13px;
+	font-family: var(--ev-font);
+
+	&.ev-fnr-visible { display: block; }
+
+	.ev-fnr-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		margin-bottom: 10px;
+		font-weight: 600;
+		color: var(--text-color, #333);
+		cursor: move;       // hint that the header is a drag handle
+		-webkit-user-select: none;
+		user-select: none;
+	}
+
+	.ev-fnr-close {
+		background: none;
+		border: none;
+		cursor: pointer;
+		font-size: 16px;
+		line-height: 1;
+		color: var(--text-muted, #8d99a6);
+		padding: 0 2px;
+		&:hover { color: var(--text-color, #333); }
+	}
+
+	.ev-fnr-row {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		margin-bottom: 6px;
+
+		label {
+			width: 58px;
+			font-size: 12px;
+			color: var(--text-muted, #8d99a6);
+			flex-shrink: 0;
+		}
+
+		input[type="text"] {
+			flex: 1;
+			height: 28px;
+			padding: 0 8px;
+			border: 1px solid var(--border-color, #d1d8dd);
+			border-radius: 4px;
+			font-size: 12px;
+			background: var(--control-bg, #f7f7f7);
+			color: var(--text-color, #333);
+			outline: none;
+
+			&:focus {
+				border-color: var(--primary-color, #4363d8);
+				background: var(--bg-color, #fff);
+				box-shadow: 0 0 0 2px rgba(67, 99, 216, 0.15);
+			}
+		}
+	}
+
+	.ev-fnr-opts {
+		display: flex;
+		gap: 14px;
+		margin: 8px 0 4px;
+		font-size: 12px;
+		color: var(--text-color, #333);
+
+		label {
+			display: flex;
+			align-items: center;
+			gap: 5px;
+			cursor: pointer;
+			-webkit-user-select: none;
+			user-select: none;
+		}
+	}
+
+	.ev-fnr-status {
+		min-height: 18px;
+		font-size: 11px;
+		color: var(--text-muted, #8d99a6);
+		text-align: center;
+		margin: 4px 0;
+	}
+
+	.ev-fnr-btns {
+		display: flex;
+		gap: 5px;
+		margin-top: 6px;
+	}
+
+	.ev-fnr-btn {
+		flex: 1;
+		height: 26px;
+		padding: 0 6px;
+		font-size: 11px;
+		border: 1px solid var(--border-color, #d1d8dd);
+		border-radius: 4px;
+		background: var(--control-bg, #f7f7f7);
+		color: var(--text-color, #333);
+		cursor: pointer;
+		white-space: nowrap;
+
+		&:hover { background: var(--bg-color, #fff); }
+
+		&.ev-fnr-primary {
+			background: var(--primary-color, #4363d8);
+			color: #fff;
+			border-color: transparent;
+			&:hover { opacity: 0.88; }
+		}
+	}
+}
+
+[data-theme="dark"] .ev-fnr-panel {
+	box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45), 0 2px 8px rgba(0, 0, 0, 0.30);
+}
+
+// HOT search result cell highlight (applied by HOT search plugin)
+.ev-page .handsontable td.htSearchResult {
+	background-color: rgba(255, 213, 0, 0.32) !important;
+}
+
+[data-theme="dark"] .ev-page .handsontable td.htSearchResult {
+	background-color: rgba(255, 200, 0, 0.18) !important;
 }
 
 // ── Status Bar ────────────────────────────────────────────────────────────────
@@ -1603,4 +1766,73 @@
 	.ev-sb-sep     { background: #3c3c3c; }
 	.ev-sb-label   { color: #6e6e6e; }
 	.ev-sb-divider { color: #3c3c3c; }
+}
+
+// ── V2.3 Async ERP formula cells ─────────────────────────────────────────────
+// Visual feedback for FRAPPE_GET / GL_BALANCE / STOCK_QTY / ITEM_PRICE etc.
+// when the async fetch is in-flight, permission denied, or errored.
+
+// Shimmer animation — GPU-composited transform sweep (no Paint cost).
+// We animate a pseudo-element's translateX instead of background-position
+// so the browser only triggers Composite, not Paint, on every frame.
+@keyframes ev-shimmer {
+	0%   { transform: translateX(-100%); }
+	100% { transform: translateX(200%); }
+}
+
+.ev-page .htCore td.ev-formula-loading {
+	position: relative;
+	overflow: hidden;
+	color: var(--ev-text-muted, #aaa);
+	font-style: italic;
+
+	&::after {
+		content: "";
+		position: absolute;
+		inset: 0;
+		width: 60%; // narrower streak looks more polished
+		background: linear-gradient(
+			90deg,
+			transparent 0%,
+			color-mix(in srgb, var(--ev-header-bg, #f0f0f0) 70%, transparent) 50%,
+			transparent 100%
+		);
+		// will-change promotes this element to its own GPU compositing layer,
+		// making the translateX animation fully Composite (no Paint per frame).
+		// The linter hints are false-positives — it can't trace will-change context.
+		will-change: transform;
+		animation: ev-shimmer 1.4s linear infinite;
+		pointer-events: none;
+	}
+}
+
+.ev-page .htCore td.ev-formula-perm {
+	color: var(--red-400, #e03131);
+	font-size: 10px;
+	font-style: italic;
+}
+
+.ev-page .htCore td.ev-formula-error {
+	color: var(--red-500, #c92a2a);
+	font-weight: 600;
+}
+
+// Dark-mode overrides for formula state cells
+// Only the pseudo-element streak colour changes — the animation stays the same.
+[data-theme="dark"] {
+	.ev-page .htCore td.ev-formula-loading {
+		color: #666;
+
+		&::after {
+			background: linear-gradient(
+				90deg,
+				transparent 0%,
+				rgba(255, 255, 255, 0.06) 50%,
+				transparent 100%
+			);
+		}
+	}
+
+	.ev-page .htCore td.ev-formula-perm  { color: #f03e3e; }
+	.ev-page .htCore td.ev-formula-error { color: #fa5252; }
 }

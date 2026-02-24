@@ -80,6 +80,7 @@ frappe.views.excel.DataManager = class DataManager {
 
 		const data = this.board.list_view.data;
 		const columns = this.board.columns;
+		let any_queued = false;
 
 		changes.forEach(([row, fieldname, , newVal]) => {
 			const doc = data[row];
@@ -93,7 +94,12 @@ frappe.views.excel.DataManager = class DataManager {
 
 			if (!this._save_queue[doc_name]) this._save_queue[doc_name] = {};
 			this._save_queue[doc_name][fieldname] = newVal;
+			any_queued = true;
 		});
+
+		// Nothing was actually queued (e.g. all changes were formula/readonly columns)
+		// — don't show the dirty indicator or schedule a pointless flush.
+		if (!any_queued) return;
 
 		this._dirty = true;
 		this._show_dirty_indicator();

@@ -74,7 +74,10 @@ frappe.views.ExcelBoard = class ExcelBoard {
 		// that toolbar_component.setup() renders.
 		this.workbook_manager = new frappe.views.excel.WorkbookManager({ board: this });
 
-		// 2. Build columns + matrix
+		// 2. Load persisted freeze state (needed before _init_hot)
+		this._frozen_cols = this.column_manager.load_freeze();
+
+		// Build columns + matrix
 		this.columns = this.column_manager.get_columns();
 		// _master_columns is the authoritative list of ALL columns (visible + hidden).
 		// this.columns = visible subset. Slicing keeps them independent.
@@ -82,8 +85,12 @@ frappe.views.ExcelBoard = class ExcelBoard {
 		this._hidden_col_keys = new Set(); // data keys of hidden columns
 		this.matrix = this.data_manager.to_matrix(this.data, this.columns);
 
-		// 3. Initialise formula engine
+		// Initialise formula engine
 		this.formula_bridge.init(this.matrix);
+
+		// V2.3 — Wire the async formula manager to the live HF instance.
+		// Must happen after formula_bridge.init() which calls HyperFormula.buildEmpty().
+		frappe.views.excel.formula_manager?.set_hf(this.formula_bridge.hf);
 
 		// 4. Render formula bar + toolbar, then set up workbook manager bindings
 		this.formula_bar_component.setup();
@@ -92,7 +99,12 @@ frappe.views.ExcelBoard = class ExcelBoard {
 
 		// 5. Build HOT container and initialise
 		this._init_container();
+		// Restore frozen-column class from user_settings (before HOT init)
+		if (this._frozen_cols > 0) this.$hot_container.addClass("ev-cols-frozen");
 		this._init_hot();
+
+		// V2.3 — Wire the re-render callback now that this.hot exists.
+		frappe.views.excel.formula_manager?.set_rerender(() => this.hot?.render());
 
 		// Status bar — after container is ready so $status_bar_container exists
 		this.status_bar = new frappe.views.excel.StatusBar({
@@ -159,6 +171,9 @@ frappe.views.ExcelBoard = class ExcelBoard {
 
 			// Context menu (right-click)
 			contextMenu: this.context_menu.get_config(),
+
+			// Frozen columns — restored from user_settings
+			fixedColumnsLeft: this._frozen_cols,
 
 			// Layout — flex child, so height: "100%" fills the ev-hot-container flex slot
 			height: "100%",
@@ -247,12 +262,21 @@ frappe.views.ExcelBoard = class ExcelBoard {
 
 		// Formula display: replace raw formula string with the HyperFormula-computed result.
 		// HOT stores the literal "=SUM(B1:B3)" string; we swap it with the evaluated value.
+		// For V2.3 async ERP functions the value may be "#LOADING…", "#PERM_DENIED", "#ERR!",
+		// or "#ARG!" — each gets a distinct CSS class for visual feedback.
 		if (this.formula_bridge?.is_formula(value)) {
 			const computed = this.formula_bridge.get_display_value(row, col);
-			const display = computed !== null && computed !== undefined ? String(computed) : "";
+			const display  = computed !== null && computed !== undefined ? String(computed) : "";
 			TD.textContent = display;
+
 			if (typeof computed === "number") {
 				TD.classList.add("htRight"); // right-align numeric results like Excel
+			} else if (display === "#LOADING\u2026") {
+				TD.classList.add("ev-formula-loading");
+			} else if (display === "#PERM_DENIED") {
+				TD.classList.add("ev-formula-perm");
+			} else if (display === "#ERR!" || display === "#ARG!") {
+				TD.classList.add("ev-formula-error");
 			}
 		}
 
@@ -424,10 +448,15 @@ frappe.views.ExcelBoard = class ExcelBoard {
 				return;
 			}
 
-			// Ctrl+F → search
+					// Ctrl+F → Find,  Ctrl+H → Find & Replace
 			if (ctrl && e.key === "f") {
 				e.preventDefault();
-				this._show_search();
+				this._show_find_replace("find");
+				return;
+			}
+			if (ctrl && e.key === "h") {
+				e.preventDefault();
+				this._show_find_replace("replace");
 				return;
 			}
 
@@ -624,22 +653,227 @@ frappe.views.ExcelBoard = class ExcelBoard {
 		);
 	}
 
-	_show_search() {
-		const plugin = this.hot.getPlugin("search");
-		if (!plugin) return;
+	// ── Find & Replace ─────────────────────────────────────────────────────────
 
-		frappe.prompt(
-			{ fieldtype: "Data", fieldname: "query", label: __("Search") },
-			({ query }) => {
-				const results = plugin.query(query);
-				if (!results.length) {
-					frappe.show_alert({ message: __("Not found"), indicator: "orange" }, 2);
-				} else {
-					this.hot.selectCell(results[0].row, results[0].col);
-				}
-			},
-			__("Search in grid"),
-			__("Search")
+	/**
+	 * Open (or focus) the floating Find & Replace panel.
+	 * @param {"find"|"replace"} focus_target  - which input to focus on open
+	 */
+	_show_find_replace(focus_target = "find") {
+		if (!this.$fnr_panel) this._build_fnr_panel();
+		this.$fnr_panel.addClass("ev-fnr-visible");
+		const $input = focus_target === "replace"
+			? this.$fnr_panel.find(".ev-fnr-replace-input")
+			: this.$fnr_panel.find(".ev-fnr-find-input");
+		$input.focus().select();
+	}
+
+	_build_fnr_panel() {
+		this._fnr_results = [];
+		this._fnr_idx = -1;
+
+		this.$fnr_panel = $(`
+			<div class="ev-fnr-panel">
+				<div class="ev-fnr-header">
+					<span>${__("Find & Replace")}</span>
+					<button class="ev-fnr-close" title="${__("Close")}">&#x2715;</button>
+				</div>
+				<div class="ev-fnr-row">
+					<label>${__("Find")}</label>
+					<input type="text" class="ev-fnr-find-input" placeholder="${__("Search…")}">
+				</div>
+				<div class="ev-fnr-row">
+					<label>${__("Replace")}</label>
+					<input type="text" class="ev-fnr-replace-input" placeholder="${__("Replace with…")}">
+				</div>
+				<div class="ev-fnr-opts">
+					<label><input type="checkbox" data-opt="match_case"> ${__("Match case")}</label>
+					<label><input type="checkbox" data-opt="whole_cell"> ${__("Whole cell")}</label>
+				</div>
+				<div class="ev-fnr-status"></div>
+				<div class="ev-fnr-btns">
+					<button class="ev-fnr-btn ev-fnr-prev">${__("◄ Prev")}</button>
+					<button class="ev-fnr-btn ev-fnr-next">${__("Next ►")}</button>
+					<button class="ev-fnr-btn ev-fnr-replace">${__("Replace")}</button>
+					<button class="ev-fnr-btn ev-fnr-primary ev-fnr-replace-all">${__("Replace All")}</button>
+				</div>
+			</div>
+		`).appendTo(document.body);
+
+		// ── Events ──────────────────────────────────────────────────────────────
+
+		this.$fnr_panel.find(".ev-fnr-close").on("click", () => this._close_find_replace());
+
+		this.$fnr_panel.find(".ev-fnr-find-input").on("keydown", (e) => {
+			if (e.key === "Escape") { this._close_find_replace(); return; }
+			if (e.key === "Enter") {
+				e.preventDefault();
+				e.shiftKey ? this._fnr_navigate(-1) : this._fnr_navigate(1);
+			}
+		});
+
+		this.$fnr_panel.find(".ev-fnr-replace-input").on("keydown", (e) => {
+			if (e.key === "Escape") { this._close_find_replace(); return; }
+			if (e.key === "Enter") { e.preventDefault(); this._fnr_replace_one(); }
+		});
+
+		// Live re-query as the user types (debounced)
+		const requery = frappe.utils.debounce(() => this._fnr_run_query(true), 200);
+		this.$fnr_panel.find(".ev-fnr-find-input").on("input", requery);
+		this.$fnr_panel.find("[data-opt]").on("change", requery);
+
+		this.$fnr_panel.find(".ev-fnr-prev").on("click", () => this._fnr_navigate(-1));
+		this.$fnr_panel.find(".ev-fnr-next").on("click", () => this._fnr_navigate(1));
+		this.$fnr_panel.find(".ev-fnr-replace").on("click", () => this._fnr_replace_one());
+		this.$fnr_panel.find(".ev-fnr-replace-all").on("click", () => this._fnr_replace_all());
+
+		// ── Drag-to-reposition via header ────────────────────────────────────────
+		let _drag_origin = null;
+		this.$fnr_panel.find(".ev-fnr-header").on("mousedown", (e) => {
+			if ($(e.target).is(".ev-fnr-close")) return;
+			const rect = this.$fnr_panel[0].getBoundingClientRect();
+			_drag_origin = { mx: e.clientX, my: e.clientY, px: rect.left, py: rect.top };
+			e.preventDefault();
+		});
+		$(document).on("mousemove.fnr_drag", (e) => {
+			if (!_drag_origin) return;
+			const max_x = window.innerWidth  - this.$fnr_panel[0].offsetWidth;
+			const max_y = window.innerHeight - this.$fnr_panel[0].offsetHeight;
+			this.$fnr_panel.css({
+				left: Math.max(0, Math.min(max_x, _drag_origin.px + e.clientX - _drag_origin.mx)) + "px",
+				top:  Math.max(0, Math.min(max_y, _drag_origin.py + e.clientY - _drag_origin.my)) + "px",
+				right: "auto",
+			});
+		});
+		$(document).on("mouseup.fnr_drag", () => { _drag_origin = null; });
+	}
+
+	_close_find_replace() {
+		this.$fnr_panel?.removeClass("ev-fnr-visible");
+		// Clear HOT search highlights
+		const plugin = this.hot?.getPlugin("search");
+		if (plugin) { plugin.query(""); this.hot.render(); }
+	}
+
+	/**
+	 * Run HOT search plugin with current query + options.
+	 * @param {boolean} reset_idx - reset current-match pointer to start
+	 */
+	_fnr_run_query(reset_idx = false) {
+		const query = this.$fnr_panel.find(".ev-fnr-find-input").val();
+		const plugin = this.hot.getPlugin("search");
+		if (!query) {
+			this._fnr_results = [];
+			if (reset_idx) this._fnr_idx = -1;
+			plugin.query("");
+			this.hot.render();
+			this._fnr_update_status();
+			return;
+		}
+
+		const match_case = this.$fnr_panel.find('[data-opt="match_case"]').is(":checked");
+		const whole_cell = this.$fnr_panel.find('[data-opt="whole_cell"]').is(":checked");
+
+		const query_method = (q, val) => {
+			const s = val?.toString() ?? "";
+			const [a, b] = match_case ? [s, q] : [s.toLowerCase(), q.toLowerCase()];
+			return whole_cell ? a === b : a.includes(b);
+		};
+
+		this._fnr_results = plugin.query(query, null, query_method);
+		if (reset_idx) this._fnr_idx = -1;
+		this.hot.render();
+		this._fnr_update_status();
+	}
+
+	/**
+	 * Navigate to the next (+1) or previous (-1) search match.
+	 * @param {1|-1} direction
+	 */
+	_fnr_navigate(direction) {
+		this._fnr_run_query(false);
+		const n = this._fnr_results.length;
+		if (!n) { this._fnr_update_status(__("No matches")); return; }
+		this._fnr_idx = ((this._fnr_idx + direction) % n + n) % n;
+		const { row, col } = this._fnr_results[this._fnr_idx];
+		this.hot.selectCell(row, col);
+		this._fnr_update_status();
+	}
+
+	/** Replace the currently selected match and advance to the next. */
+	_fnr_replace_one() {
+		if (!this.list_view.can_write) {
+			frappe.show_alert({ message: __("No write permission"), indicator: "red" }, 2);
+			return;
+		}
+		const sel = this.hot.getSelected()?.[0];
+		if (!sel) { this._fnr_navigate(1); return; }
+		const row = sel[0], col = sel[1];
+		// Only replace if this cell is actually a search match
+		const is_match = this._fnr_results.some((m) => m.row === row && m.col === col);
+		if (!is_match) { this._fnr_navigate(1); return; }
+		// Use HOT's getCellMeta — covers both _readonly columns AND permission-based readonly
+		if (this.hot.getCellMeta(row, col).readOnly) { this._fnr_navigate(1); return; }
+		const replace_val = this.$fnr_panel.find(".ev-fnr-replace-input").val();
+		this.hot.setDataAtCell(row, col, replace_val);
+		this._fnr_run_query(false);
+		this._fnr_navigate(1);
+	}
+
+	/** Replace every non-readonly match in one batch operation. */
+	_fnr_replace_all() {
+		if (!this.list_view.can_write) {
+			frappe.show_alert({ message: __("No write permission"), indicator: "red" }, 2);
+			return;
+		}
+		this._fnr_run_query(true);
+		if (!this._fnr_results.length) {
+			frappe.show_alert({ message: __("Nothing to replace"), indicator: "orange" }, 2);
+			return;
+		}
+		const replace_val = this.$fnr_panel.find(".ev-fnr-replace-input").val();
+		const changes = this._fnr_results
+			.filter(({ row, col }) => !this.hot.getCellMeta(row, col).readOnly)
+			.map(({ row, col }) => [row, col, replace_val]);
+		if (changes.length) {
+			this.hot.setDataAtCell(changes);
+			frappe.show_alert(
+				{ message: __("{0} cell(s) replaced", [changes.length]), indicator: "green" },
+				3
+			);
+		}
+		this._fnr_run_query(true);
+	}
+
+	_fnr_update_status(override_msg = null) {
+		const $s = this.$fnr_panel.find(".ev-fnr-status");
+		if (override_msg) { $s.text(override_msg); return; }
+		const n = this._fnr_results.length;
+		const q = this.$fnr_panel.find(".ev-fnr-find-input").val();
+		if (!q)  { $s.text(""); return; }
+		if (!n)  { $s.text(__("No matches")); return; }
+		if (this._fnr_idx < 0) { $s.text(__("{0} match(es) found", [n])); return; }
+		$s.text(__("{0} of {1}", [this._fnr_idx + 1, n]));
+	}
+
+	// ── Column freeze ─────────────────────────────────────────────────────────
+
+	/**
+	 * Set or clear the column freeze boundary.
+	 * @param {number} n - columns to freeze (0 = unfreeze)
+	 */
+	_set_freeze(n) {
+		this._frozen_cols = n;
+		this.hot.updateSettings({ fixedColumnsLeft: n });
+		this.column_manager.save_freeze(n);
+		// CSS class drives the freeze-boundary green border (border only when frozen)
+		this.$hot_container.toggleClass("ev-cols-frozen", n > 0);
+
+		frappe.show_alert(
+			n > 0
+				? { message: __("{0} column(s) frozen", [n]), indicator: "green" }
+				: { message: __("Columns unfrozen"), indicator: "blue" },
+			2
 		);
 	}
 
@@ -697,17 +931,22 @@ frappe.views.ExcelBoard = class ExcelBoard {
 		this._master_columns = [...this.columns];
 		this._hidden_col_keys.clear();
 
-		// Rebuild HyperFormula matrix with the new column set
-		this.matrix = this.data_manager.to_matrix(this.list_view.data, this.columns);
-		this.formula_bridge.reload(this.matrix);
-
-		// Push updated column config to HOT and do a full data reload.
-		// hot.render() alone doesn't rebuild the column DOM structure when
-		// the column *count* changes — loadData forces a proper re-init.
+		// Push the new column headers to HOT immediately so the UI updates.
 		this.hot.updateSettings({ columns: this.columns });
-		this.hot.loadData(this.list_view.data);
 
-		frappe.show_alert({ message: __("Columns updated"), indicator: "green" }, 2);
+		// CRITICAL: update list_view.fields so the next server fetch includes
+		// the newly selected fields. Without this, data for new columns never
+		// arrives — the server returns only the fields it was originally asked for.
+		this.list_view.fields = [
+			["name", this.doctype],
+			...this.column_manager.fields,
+		];
+
+		// Force a fresh data fetch — bypass no_change throttle.
+		// render() → board.refresh(data) will reload the matrix + HF + HOT data.
+		this.list_view.last_args = null;
+		this.list_view.start = 0;
+		this.list_view.refresh();
 	}
 
 	// ── Public API ────────────────────────────────────────────────────────────
@@ -719,6 +958,9 @@ frappe.views.ExcelBoard = class ExcelBoard {
 		this.data = new_data;
 		this.matrix = this.data_manager.to_matrix(new_data, this.columns);
 		this.formula_bridge.reload(this.matrix);
+		// V2.3 — clear async formula cache on every data reload so cells
+		// don't show stale values after filters change or "Load More" fires.
+		frappe.views.excel.formula_manager?.clear();
 		this.hot.loadData(new_data);
 	}
 
