@@ -12,7 +12,9 @@ A full spreadsheet experience built into Frappe — edit, format, and analyze an
 - **Custom cell editors** — Date picker, Link selector, Select listbox, Currency formatter, Checkbox
 - **Formatting toolbar** — Bold, Italic, Underline, Strikethrough, Alignment, Wrap, Font, Size, Text color, Fill color
 - **Autofill** — Drag formulas down/up with automatic relative reference adjustment
-- **Context menu** — Right-click to insert/delete rows, copy formulas
+- **Context menu** — Right-click to insert/delete rows, hide/show columns, add formula columns
+- **Status bar** — Live selection stats (Count, Sum, Average, Min, Max) in a fixed footer
+- **Saved Workbooks** — Save named views with formula columns, column layout, and filters
 - **Export** — Export to `.xlsx` (Excel) or `.csv`
 - **Import** — Import from `.xlsx` or `.csv` with column mapping
 - **Inline save** — Cell edits sync back to Frappe DB in real time
@@ -39,7 +41,42 @@ bench build --app excel_view   # required after every pull (dist files are not c
 
 ## Release Notes
 
-### v2.0 — Current (Feb 2026)
+### v2.2 — Current (Feb 2026)
+
+**Status Bar**
+- Fixed footer below the grid showing live selection stats: address (A1:C5), Count, Sum, Average, Min, Max
+- Values update on every selection change via HOT `afterSelection` hook
+- Performance guard: skips numeric scan for selections > 5,000 cells
+- Correctly handles formula cells (uses HyperFormula evaluated result)
+- Numeric detection uses strict regex — date strings like `"2026-02-22"` are NOT counted as numbers
+
+**Layout & Scrollbar fixes**
+- Grid wrapper refactored to `flex-direction: column` so status bar always appears at bottom
+- HOT height initialized via `setTimeout(0)` to read correct `clientHeight` after flex paint
+- `ResizeObserver` also updates HOT height setting on resize — scrollbars always correct
+- HOT horizontal/vertical scrollbars styled: 9px, gray thumb, visible on all platforms
+
+---
+
+### v2.1 — Saved Workbooks (Feb 2026)
+
+**Excel Workbook DocType**
+- Save named workbooks per DocType with: column selection, column order, column widths, formula columns
+- Load/switch workbooks from the toolbar "Views" dropdown
+- "Save View" split-button: overwrite current workbook or save as new
+- My Workbooks / Shared Workbooks sections
+- Delete workbook with confirmation
+- Workbook state persists across sessions (server-side via Frappe DocType)
+
+**Formula Columns**
+- Add virtual columns not tied to any Frappe field
+- Supports formulas (`=SUM`, `=IF`, etc.) and plain values
+- Saved and restored as part of workbook
+- Autofill works with relative reference adjustment
+
+---
+
+### v2.0 — Foundation (Feb 2026)
 
 **Performance**
 - **Lazy loading** — Split into two bundles: a 4KB router bundle (loads on every page) and a 1.6MB deps bundle (loads only when Excel View is opened). Zero cost for users who don't open Excel View.
@@ -55,12 +92,22 @@ bench build --app excel_view   # required after every pull (dist files are not c
 - Default columns: `in_list_view` fields sorted A→Z; user's saved order respected on subsequent loads
 - `docstatus` and `idx` permanently excluded (use Status field for document state)
 
+**Toolbar**
+- All formatting buttons wired for single cell and multi-cell range selection
+- `outsideClickDeselects: false` — toolbar clicks don't deselect the grid
+- Rich color palette: 3-section Excel 2007 style (theme colors, standard colors, recent colors + custom hex)
+
 **Grid refinements**
 - Columns default sorted A→Z by label for any DocType
 - `ResizeObserver` on grid wrapper — auto re-renders on sidebar toggle, panel resize, window resize
 - Column widths persist per user per DocType
+- Hide/show columns via right-click context menu
+- Formula columns (virtual, not saved to DB)
+
+---
 
 ### v1.0 — Initial Release
+
 - Full spreadsheet grid for any DocType
 - HyperFormula integration (400+ formulas)
 - Formula bar, autofill with relative reference adjustment
@@ -75,21 +122,30 @@ bench build --app excel_view   # required after every pull (dist files are not c
 
 ## Upcoming
 
-### v2.0 (in progress)
-- **Toolbar wiring** — All formatting buttons fully wired to range selections
-- **Rich color palette** — Excel-style 3-section palette (theme colors, standard colors, recent colors)
-
-### v2.1
-- **Excel Workbooks** — Save named workbooks with formula columns, column layout, and filters. Load/switch workbooks from the toolbar.
-
-### v2.2
-- Column freeze, status bar (SUM/AVG/COUNT on selection), find & replace, cell comments
+### v2.2 (in progress)
+- **Column freeze** — Right-click column header → "Freeze up to this column" (HOT `fixedColumnsLeft`)
+- **Find & Replace** — Ctrl+H dialog with match case, whole cell, search in formulas options
+- **Cell Comments** — Wire HOT's built-in comments plugin with @mention notifications
 
 ### v2.3
-- `QUERY()` formula for parameterized data pulls, Frappe formula library (`=FRAPPE.GET()`, `=GL_BALANCE()`, `=STOCK_QTY()`), workflow actions from grid
+- `QUERY()` formula for parameterized data pulls
+- Frappe formula library (`=FRAPPE.GET()`, `=GL_BALANCE()`, `=STOCK_QTY()`, `=ITEM_PRICE()`)
+- Workflow actions from grid (Submit / Approve / Reject via right-click, bulk operations)
+
+### v2.4 — Intelli-Sync (AI-Based Semantic VLOOKUP)
+- **Auto-detect column relationships** — 3-layer engine: Regex naming series → Semantic existence sampling → NetworkX graph pathfinding
+- **`=INTELLI_LINK(A2, "field_name")`** — custom HyperFormula function that fetches related DocType fields live
+- **Zero schema knowledge required** — works even for denormalized/scripted columns without explicit Link fields
+- **Perm-level enforcement** — restricted fields auto-masked (`***`) or column set `readOnly` based on user role
+
+### v2.5 — Multi-Sheet Workbooks (pulled forward from v3)
+- Sheet tab bar at bottom (like Excel / Google Sheets)
+- Each tab = independent DocType with its own columns, filters, and data
+- HyperFormula multi-sheet registration (foundation for cross-sheet formulas in v3)
+- IntelliLookup preview — auto-suggest joins between sheets
 
 ### v3.0+
-- Multiple sheet tabs, cross-sheet formulas, charts, pivot tables, conditional formatting, dashboard mode, ERP-native formula library
+- Cross-sheet formulas, charts, pivot tables, conditional formatting, dashboard mode, Formula-AI (NL → QUERY())
 
 ---
 

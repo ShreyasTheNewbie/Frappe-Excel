@@ -47,6 +47,38 @@ frappe.views.excel.ExcelToolbar = class ExcelToolbar {
 
 		$(this.wrapper).html(`
 			<div class="ev-toolbar">
+
+				<!-- ── Workbook: Save View + Views ─────────────────────────── -->
+				<div class="ev-tb-group ev-wb-group">
+
+					<!-- Split save button: [💾 Save View][▾] -->
+					<div class="ev-wb-save-wrap">
+						<button class="ev-tb-btn ev-wb-save-btn" title="${__("Save current view")}">
+							<svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+								<path d="M2 2a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V5.5L11.5 1H3a1 1 0 0 0-1 1zm0 1h9l3 3.5V13H2V3zm3 6h6v1H5v-1zm0-2h6v1H5V7z"/>
+							</svg>
+							<span class="ev-wb-save-label">${__("Save View")}</span>
+						</button>
+						<!-- Shown only when a workbook is active — click to deselect -->
+						<button class="ev-tb-btn ev-wb-deselect-btn hide" title="${__("Deselect this view")}">×</button>
+						<button class="ev-tb-btn ev-wb-dropdown-arrow" title="${__("More save options")}">▾</button>
+						<!-- Dropdown menu -->
+						<div class="ev-wb-dropdown hide">
+							<button class="ev-wb-dd-item" data-action="save_as">${__("Save As…")}</button>
+						</div>
+					</div>
+
+					<!-- Views browser -->
+					<button class="ev-tb-btn ev-wb-views-btn" title="${__("Open a saved view")}">
+						<svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+							<path d="M1 3.5A1.5 1.5 0 0 1 2.5 2h2.764c.958 0 1.76.56 2.311 1.184C7.985 3.648 8.48 4 9 4h4.5A1.5 1.5 0 0 1 15 5.5v7a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 1 12.5v-9z"/>
+						</svg>
+						${__("Views")}
+					</button>
+				</div>
+
+				<div class="ev-tb-sep"></div>
+
 				<!-- Choose Columns -->
 				<div class="ev-tb-group">
 					<button class="ev-tb-btn ev-columns-btn" title="${__("Choose Columns")}">
@@ -107,7 +139,7 @@ frappe.views.excel.ExcelToolbar = class ExcelToolbar {
 
 				<div class="ev-tb-sep"></div>
 
-				<!-- Alignment -->
+<!-- Horizontal Alignment -->
 				<div class="ev-tb-group">
 					<button class="ev-tb-btn ev-fmt-btn" data-fmt="alignLeft"
 						title="${__("Align Left")}">
@@ -120,6 +152,24 @@ frappe.views.excel.ExcelToolbar = class ExcelToolbar {
 					<button class="ev-tb-btn ev-fmt-btn" data-fmt="alignRight"
 						title="${__("Align Right")}">
 						<span class="ev-align-icon ev-align-right"></span>
+					</button>
+				</div>
+
+				<div class="ev-tb-sep"></div>
+
+				<!-- Vertical Alignment -->
+				<div class="ev-tb-group">
+					<button class="ev-tb-btn ev-fmt-btn" data-fmt="valignTop"
+						title="${__("Align Top")}">
+						<svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="1" width="12" height="1.5" rx="0.5"/><rect x="3" y="3.5" width="3" height="8" rx="0.5"/><rect x="8" y="3.5" width="3" height="5" rx="0.5"/></svg>
+					</button>
+					<button class="ev-tb-btn ev-fmt-btn" data-fmt="valignMiddle"
+						title="${__("Align Middle")}">
+						<svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="6.25" width="12" height="1.5" rx="0.5"/><rect x="3" y="2" width="3" height="10" rx="0.5"/><rect x="8" y="3.5" width="3" height="7" rx="0.5"/></svg>
+					</button>
+					<button class="ev-tb-btn ev-fmt-btn" data-fmt="valignBottom"
+						title="${__("Align Bottom")}">
+						<svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="11.5" width="12" height="1.5" rx="0.5"/><rect x="3" y="2" width="3" height="8" rx="0.5"/><rect x="8" y="4.5" width="3" height="5" rx="0.5"/></svg>
 					</button>
 				</div>
 
@@ -147,30 +197,58 @@ frappe.views.excel.ExcelToolbar = class ExcelToolbar {
 	}
 
 	_palette_html() {
-		// 40-color standard palette (2 rows of 20 = 4 rows of 10)
-		const colors = [
-			// Row 1: blacks + grays + white
-			"#000000", "#1F2937", "#374151", "#6B7280", "#9CA3AF",
-			"#D1D5DB", "#E5E7EB", "#F3F4F6", "#F9FAFB", "#FFFFFF",
-			// Row 2: reds + oranges + yellows
-			"#7F0000", "#C00000", "#FF0000", "#FF4500", "#FF8C00",
-			"#FFA500", "#FFD700", "#FFFF00", "#FFFF9C", "#FFF2CC",
-			// Row 3: greens + cyans + blues
-			"#002060", "#0070C0", "#00B0F0", "#00FFFF", "#00B050",
-			"#92D050", "#008000", "#E2EFDA", "#C6EFCE", "#DDEBF7",
-			// Row 4: purples + pinks
-			"#7030A0", "#9B59B6", "#EA4C89", "#FF1493", "#C00099",
-			"#FFD7E9", "#FCE4D6", "#FFC7CE", "#FFEB9C", "#D6E4BC",
+		// Excel 2007 Office theme — 10 base accent colors
+		const THEME_BASES = [
+			"#FFFFFF", "#000000", "#EEECE1", "#1F497D",
+			"#4F81BD", "#C0504D", "#9BBB59", "#8064A2",
+			"#4BACC6", "#F79646",
 		];
+		// 5 variation rows below base: tint 50%, tint 35%, tint 25%, shade 25%, shade 50%
+		const VARIATIONS = [0.5, 0.35, 0.25, -0.25, -0.5];
+		// Excel 2007 standard colors row
+		const STANDARD = [
+			"#C00000", "#FF0000", "#FFC000", "#FFFF00", "#92D050",
+			"#00B050", "#00B0F0", "#0070C0", "#002060", "#7030A0",
+		];
+
+		const swatch = (c) =>
+			`<span class="ev-swatch" data-color="${c}" style="background:${c}" title="${c}"></span>`;
+
+		// Row 0: base theme colors
+		let theme_html = THEME_BASES.map(swatch).join("");
+		// Rows 1-5: tints and shades
+		for (const f of VARIATIONS) {
+			theme_html += THEME_BASES.map(c => swatch(this._vary_color(c, f))).join("");
+		}
+
+		const std_html = STANDARD.map(swatch).join("");
+
 		return `
-			<div class="ev-palette-grid">
-				${colors.map(c => `<span class="ev-swatch" data-color="${c}"
-					style="background:${c}" title="${c}"></span>`).join("")}
+			<div class="ev-pal-section">
+				<span class="ev-pal-label">${__("Theme Colors")}</span>
+				<div class="ev-pal-grid ev-pal-theme-grid">${theme_html}</div>
 			</div>
-			<div class="ev-palette-custom">
-				<input type="color" class="ev-custom-color" value="#000000"
-					title="${__("Custom color")}">
-				<span>${__("More colors...")}</span>
+			<div class="ev-pal-rule"></div>
+			<div class="ev-pal-section">
+				<span class="ev-pal-label">${__("Standard Colors")}</span>
+				<div class="ev-pal-grid ev-pal-std-grid">${std_html}</div>
+			</div>
+			<div class="ev-pal-rule"></div>
+			<div class="ev-pal-recent-wrap hide">
+				<span class="ev-pal-label">${__("Recent Colors")}</span>
+				<div class="ev-pal-grid ev-pal-recent-grid"></div>
+				<div class="ev-pal-rule"></div>
+			</div>
+			<button class="ev-pal-more-btn">
+				<svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor" style="flex-shrink:0">
+					<circle cx="2" cy="6" r="1.5"/><circle cx="6" cy="6" r="1.5"/><circle cx="10" cy="6" r="1.5"/>
+				</svg>
+				${__("More Colors...")}
+			</button>
+			<div class="ev-pal-custom-panel hide">
+				<input type="color" class="ev-custom-color" value="#000000">
+				<input type="text" class="ev-hex-input" placeholder="#000000" maxlength="7">
+				<button class="ev-hex-apply-btn">OK</button>
 			</div>
 		`;
 	}
@@ -209,9 +287,41 @@ frappe.views.excel.ExcelToolbar = class ExcelToolbar {
 			this._pick_color($(e.currentTarget).data("color"));
 		});
 
-		// Custom color input
-		this.$palette.on("input change", ".ev-custom-color", (e) => {
-			this._pick_color(e.target.value);
+		// More Colors toggle
+		this.$palette.on("click", ".ev-pal-more-btn", (e) => {
+			e.stopPropagation();
+			const $panel = this.$palette.find(".ev-pal-custom-panel");
+			$panel.toggleClass("hide");
+			if (!$panel.hasClass("hide")) {
+				// Pre-fill with the current cell's color
+				const current = this._color_target === "color"
+					? this._last_text_color : this._last_bg_color;
+				const safe = /^#[0-9A-Fa-f]{6}$/.test(current) ? current : "#000000";
+				$panel.find(".ev-custom-color").val(safe);
+				$panel.find(".ev-hex-input").val(safe);
+			}
+		});
+
+		// Native color picker → sync hex input (live preview, don't apply yet)
+		this.$palette.on("input", ".ev-custom-color", (e) => {
+			this.$palette.find(".ev-hex-input").val(e.target.value);
+		});
+
+		// Hex text input → sync native picker
+		this.$palette.on("input", ".ev-hex-input", (e) => {
+			const v = e.target.value.trim();
+			if (/^#[0-9A-Fa-f]{6}$/i.test(v)) {
+				this.$palette.find(".ev-custom-color").val(v);
+			}
+		});
+
+		// Apply custom color (OK button)
+		this.$palette.on("click", ".ev-hex-apply-btn", () => {
+			const hex = this.$palette.find(".ev-hex-input").val().trim().toLowerCase();
+			const color = /^#[0-9a-f]{6}$/.test(hex)
+				? hex
+				: this.$palette.find(".ev-custom-color").val();
+			this._pick_color(color);
 		});
 
 		// Close palette on outside click
@@ -225,36 +335,63 @@ frappe.views.excel.ExcelToolbar = class ExcelToolbar {
 	// ── Public API ────────────────────────────────────────────────────────────
 
 	/**
-	 * Sync toolbar state (active buttons, dropdowns) with a cell's stored format.
-	 * Called on cell selection.
+	 * Sync toolbar state (active buttons, dropdowns) with the current selection.
+	 * For toggle buttons (bold/italic/etc): active only if ALL cells in range have the format.
+	 * For dropdowns + color bars: reflect the top-left cell of the selection.
+	 * Called on cell selection change.
 	 */
 	sync(row, col) {
+		// Use current HOT range for multi-cell awareness; fall back to single cell.
+		const range = this._get_range() || { r1: row, c1: col, r2: row, c2: col };
+
+		// Top-left cell format drives dropdowns and color bars.
 		const fmt = this.board.format_store?.[`${row}:${col}`] || {};
 
-		// Toggle active state on format buttons
+		// ── Toggle buttons ──────────────────────────────────────────────────
+		const ALIGN_MAP  = { alignLeft: "left", alignCenter: "center", alignRight: "right" };
+		const VALIGN_MAP = { valignTop: "top", valignMiddle: "middle", valignBottom: "bottom" };
 		this.$toolbar.find(".ev-fmt-btn").each((_, btn) => {
 			const f = $(btn).data("fmt");
 			if (f.startsWith("align")) {
-				const val = { alignLeft: "left", alignCenter: "center", alignRight: "right" }[f];
-				$(btn).toggleClass("ev-active", fmt.align === val);
+				const val = ALIGN_MAP[f];
+				let all = true;
+				outer: for (let r = range.r1; r <= range.r2; r++) {
+					for (let c = range.c1; c <= range.c2; c++) {
+						if ((this.board.format_store?.[`${r}:${c}`]?.align || null) !== val) {
+							all = false; break outer;
+						}
+					}
+				}
+				$(btn).toggleClass("ev-active", all);
+			} else if (f.startsWith("valign")) {
+				const val = VALIGN_MAP[f];
+				// Default is "middle" — active when all cells match (or have no valign = middle)
+				let all = true;
+				outer2: for (let r = range.r1; r <= range.r2; r++) {
+					for (let c = range.c1; c <= range.c2; c++) {
+						const cv = this.board.format_store?.[`${r}:${c}`]?.valign || "middle";
+						if (cv !== val) { all = false; break outer2; }
+					}
+				}
+				$(btn).toggleClass("ev-active", all);
 			} else {
-				$(btn).toggleClass("ev-active", !!fmt[f]);
+				// Bold/italic/underline/strike/wrap: active only if ALL cells have it
+				$(btn).toggleClass("ev-active", this._all_have(range, f));
 			}
 		});
 
-		// Sync dropdowns
+		// ── Dropdowns (top-left cell) ───────────────────────────────────────
 		this.$font_family.val(fmt.font || "Calibri");
 		this.$font_size.val(fmt.size || 12);
 
-		// Sync color bars
-		if (fmt.color) {
-			this._last_text_color = fmt.color;
-			this.$toolbar.find(".ev-text-bar").css("background", fmt.color);
-		}
-		if (fmt.bg) {
-			this._last_bg_color = fmt.bg;
-			this.$toolbar.find(".ev-bg-bar").css("background", fmt.bg);
-		}
+		// ── Color bars — always reset to current cell value or default ──────
+		// Never leave a stale color from a previous selection.
+		const text_color = fmt.color || "#000000";
+		const bg_color   = fmt.bg    || "#FFFF00";
+		this._last_text_color = text_color;
+		this._last_bg_color   = bg_color;
+		this.$toolbar.find(".ev-text-bar").css("background", text_color);
+		this.$toolbar.find(".ev-bg-bar").css("background", bg_color);
 	}
 
 	/**
@@ -291,6 +428,11 @@ frappe.views.excel.ExcelToolbar = class ExcelToolbar {
 			this._apply_to_range(range, (fmt) => {
 				fmt.align = fmt.align === val ? null : val;
 			});
+		} else if (fmt_key.startsWith("valign")) {
+			const val = { valignTop: "top", valignMiddle: "middle", valignBottom: "bottom" }[fmt_key];
+			this._apply_to_range(range, (fmt) => {
+				fmt.valign = val;
+			});
 		} else {
 			const all_on = this._all_have(range, fmt_key);
 			this._apply_to_range(range, (fmt) => {
@@ -298,7 +440,13 @@ frappe.views.excel.ExcelToolbar = class ExcelToolbar {
 			});
 		}
 
-		this.board.hot.render();
+		// Bold can slightly affect height; refresh to keep rows snug.
+		const HEIGHT_FMT = new Set(["bold", "wrap"]);
+		if (HEIGHT_FMT.has(fmt_key)) {
+			this.board.refresh_row_heights(range.r1, range.r2);
+		} else {
+			this.board.hot.render();
+		}
 		const sel = this.board.hot.getSelectedLast();
 		if (sel) this.sync(sel[0], sel[1]);
 	}
@@ -307,11 +455,20 @@ frappe.views.excel.ExcelToolbar = class ExcelToolbar {
 		const range = this._get_range();
 		if (!range) return;
 		this._apply_to_range(range, (fmt) => Object.assign(fmt, fmt_obj));
-		this.board.hot.render();
+		// Font size changes need row height recalculation.
+		if (fmt_obj.size != null) {
+			this.board.refresh_row_heights(range.r1, range.r2);
+		} else {
+			this.board.hot.render();
+		}
 	}
 
 	_show_palette(trigger_el, type) {
 		this._color_target = type;
+		// Refresh recent swatches from localStorage each time the palette opens
+		this._refresh_recent_swatches();
+		// Collapse the custom panel if it was left open
+		this.$palette.find(".ev-pal-custom-panel").addClass("hide");
 		const btn_rect = trigger_el.getBoundingClientRect();
 		const wrap_rect = this.wrapper.getBoundingClientRect();
 		this.$palette.css({
@@ -334,6 +491,7 @@ frappe.views.excel.ExcelToolbar = class ExcelToolbar {
 				this.$toolbar.find(".ev-bg-bar").css("background", color);
 			}
 		}
+		this._save_recent(color);
 		this.$palette.addClass("hide");
 	}
 
@@ -359,5 +517,61 @@ frappe.views.excel.ExcelToolbar = class ExcelToolbar {
 			}
 		}
 		return true;
+	}
+
+	// ── Color helpers ─────────────────────────────────────────────────────────
+
+	/**
+	 * Apply a tint (factor > 0, blends toward white) or shade (factor < 0,
+	 * blends toward black) to a 6-digit hex color string.
+	 * Matches the Excel 2007 Office-theme tint/shade math.
+	 */
+	_vary_color(hex, factor) {
+		const r = parseInt(hex.slice(1, 3), 16);
+		const g = parseInt(hex.slice(3, 5), 16);
+		const b = parseInt(hex.slice(5, 7), 16);
+		let nr, ng, nb;
+		if (factor > 0) {
+			nr = Math.round(r + (255 - r) * factor);
+			ng = Math.round(g + (255 - g) * factor);
+			nb = Math.round(b + (255 - b) * factor);
+		} else {
+			const s = -factor;
+			nr = Math.round(r * (1 - s));
+			ng = Math.round(g * (1 - s));
+			nb = Math.round(b * (1 - s));
+		}
+		return "#" + [nr, ng, nb]
+			.map(v => Math.min(255, Math.max(0, v)).toString(16).padStart(2, "0"))
+			.join("");
+	}
+
+	_load_recent() {
+		try {
+			return JSON.parse(localStorage.getItem("ev_recent_colors") || "[]");
+		} catch {
+			return [];
+		}
+	}
+
+	_save_recent(color) {
+		let recent = this._load_recent().filter(c => c !== color);
+		recent.unshift(color);
+		localStorage.setItem("ev_recent_colors", JSON.stringify(recent.slice(0, 10)));
+	}
+
+	_refresh_recent_swatches() {
+		const recent = this._load_recent();
+		const $wrap = this.$palette.find(".ev-pal-recent-wrap");
+		if (!recent.length) {
+			$wrap.addClass("hide");
+			return;
+		}
+		$wrap.removeClass("hide");
+		$wrap.find(".ev-pal-recent-grid").html(
+			recent.map(c =>
+				`<span class="ev-swatch" data-color="${c}" style="background:${c}" title="${c}"></span>`
+			).join("")
+		);
 	}
 };
