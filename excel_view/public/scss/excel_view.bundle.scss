@@ -169,13 +169,22 @@
 
 .ev-grid-wrapper {
 	flex: 1 1 auto;
+	min-height: 0;          // allow flex shrink below content size
 	overflow: hidden;
 	position: relative;
+	display: flex;
+	flex-direction: column;
 
 	.ev-hot-container {
+		flex: 1 1 auto;
+		min-height: 0;      // required so HOT shrinks properly inside flex
 		width: 100%;
-		height: 100%;
 		overflow: hidden;
+	}
+
+	// Default vertical alignment for all data cells
+	.handsontable td {
+		vertical-align: middle;
 	}
 }
 
@@ -188,7 +197,7 @@
 
 	// ── All base cells ────────────────────────────────────────────────────────
 	td {
-		background: var(--ev-cell-bg);
+		background-color: var(--ev-cell-fill, var(--ev-cell-bg));
 		color: var(--ev-text);
 		border-color: var(--ev-grid-line) !important;
 		padding: 0 4px;
@@ -241,13 +250,14 @@
 	.current {
 		outline: 2px solid var(--ev-sel-border) !important;
 		outline-offset: -2px;
-		background: var(--ev-cell-bg) !important;
+		background-color: var(--ev-cell-fill, var(--ev-cell-bg)) !important;
 	}
 
-	// ── Selection range — solid Excel blue tint ────────────────────────────────
+	// ── Selection range — fill colour preserved, tint applied as image overlay ──
 	td.area,
 	.area {
-		background: var(--ev-sel-range) !important;
+		background-color: var(--ev-cell-fill, var(--ev-cell-bg)) !important;
+		background-image: linear-gradient(var(--ev-sel-range), var(--ev-sel-range)) !important;
 	}
 
 	// ── Read-only / dimmed ────────────────────────────────────────────────────
@@ -290,12 +300,12 @@
 	// ── No alternating rows (Excel default = clean white) ─────────────────────
 	tbody tr:nth-child(odd) td,
 	tbody tr:nth-child(even) td {
-		background: var(--ev-cell-bg);
+		background-color: var(--ev-cell-fill, var(--ev-cell-bg));
 	}
 
-	// Hover — barely visible, Excel-like
+	// Hover — barely visible; fill colour wins over hover tint
 	tbody tr:hover td:not(.current):not(.area) {
-		background: #f5f9fc !important;
+		background-color: var(--ev-cell-fill, #f5f9fc) !important;
 	}
 
 	// ── Context menu ─────────────────────────────────────────────────────────
@@ -528,61 +538,330 @@
 
 .ev-wrap-icon { font-size: 14px; }
 
-// ── Color palette popup ────────────────────────────────────────────────────────
+// ── Workbook toolbar group (Save View / Views) ────────────────────────────────
+
+.ev-wb-group {
+	// Let the save-wrap (split button) stack naturally beside Views btn
+}
+
+// Split save button container: [💾 Save View] [▾]
+.ev-wb-save-wrap {
+	display:  flex;
+	position: relative;   // dropdown positions against this
+
+	.ev-wb-save-btn {
+		flex-direction: row;
+		border-radius: 3px 0 0 3px;
+		gap: 4px;
+		padding: 0 7px 0 5px;
+		min-width: unset;
+		font-weight: 500;
+		font-size: 11px;
+		border-right: none;
+
+		svg { flex-shrink: 0; color: var(--ev-green); }
+	}
+
+	// Deselect × — visible only when a workbook is active
+	.ev-wb-deselect-btn {
+		border-radius: 0;
+		border-left:   none;
+		border-right:  none;
+		min-width:     18px;
+		padding:       0 4px;
+		font-size:     13px;
+		line-height:   1;
+		color:         var(--ev-text-muted);
+		&:hover { color: #c0392b; background: #fde8e8; }
+	}
+
+	.ev-wb-dropdown-arrow {
+		border-radius: 0 3px 3px 0;
+		min-width: 18px;
+		padding: 0 3px;
+		font-size: 9px;
+		color: var(--ev-text-muted);
+	}
+}
+
+// Dropdown menu that appears below the ▾ arrow
+.ev-wb-dropdown {
+	position:   absolute;
+	top:        calc(100% + 3px);
+	left:       0;
+	min-width:  130px;
+	background: #ffffff;
+	border:     1px solid #c8c8c8;
+	border-radius: 3px;
+	box-shadow: 2px 4px 8px rgba(0, 0, 0, 0.14);
+	z-index:    1200;
+	padding:    3px 0;
+
+	.ev-wb-dd-item {
+		display:     block;
+		width:       100%;
+		text-align:  left;
+		background:  transparent;
+		border:      none;
+		padding:     5px 12px;
+		font-size:   12px;
+		font-family: var(--ev-font);
+		color:       var(--ev-text);
+		cursor:      pointer;
+		white-space: nowrap;
+
+		&:hover { background: #e8f2ff; }
+	}
+}
+
+// Views button — slightly wider to show label + icon
+.ev-wb-views-btn {
+	flex-direction: row;
+	gap: 4px;
+	padding: 0 8px 0 5px;
+	min-width: unset;
+	font-size: 11px;
+
+	svg { flex-shrink: 0; color: var(--ev-text-muted); }
+}
+
+// ── Open View dialog — workbook list ─────────────────────────────────────────
+
+.ev-wb-section-label {
+	font-size:      10px;
+	font-weight:    600;
+	text-transform: uppercase;
+	letter-spacing: 0.06em;
+	color:          var(--ev-text-muted);
+	padding:        10px 4px 4px;
+
+	&:first-child { padding-top: 4px; }
+}
+
+.ev-wb-list {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.ev-wb-row {
+	display:     flex;
+	align-items: center;
+	gap:         8px;
+	padding:     7px 10px;
+	border-radius: 4px;
+	cursor:      pointer;
+	transition:  background 0.1s;
+
+	&:hover { background: #f0f6ff; }
+
+	.ev-wb-row-icon   { color: var(--ev-green); flex-shrink: 0; }
+	.ev-wb-row-title  { flex: 1; font-size: 13px; font-weight: 500; }
+	.ev-wb-row-date   { font-size: 11px; color: var(--ev-text-muted); white-space: nowrap; }
+
+	.ev-wb-row-del {
+		flex-shrink: 0;
+		background:  transparent;
+		border:      none;
+		color:       var(--ev-text-muted);
+		font-size:   11px;
+		cursor:      pointer;
+		padding:     2px 5px;
+		border-radius: 3px;
+		opacity:     0;
+		transition:  opacity 0.15s, background 0.1s;
+		line-height: 1;
+
+		&:hover { background: #fde8e8; color: #c0392b; }
+	}
+
+	&:hover .ev-wb-row-del { opacity: 1; }
+
+	// Active (currently loaded) workbook row
+	&.ev-wb-row--active {
+		background: #eaf4ff;
+		border-left: 3px solid var(--ev-primary, #1a73e8);
+		padding-left: 7px; // compensate for border
+
+		.ev-wb-row-title { color: var(--ev-primary, #1a73e8); font-weight: 600; }
+		&:hover { background: #d8ecff; }
+	}
+
+	.ev-wb-active-check {
+		color:      var(--ev-primary, #1a73e8);
+		font-size:  14px;
+		font-weight: 700;
+		flex-shrink: 0;
+		line-height: 1;
+	}
+
+	.ev-wb-row-shared {
+		font-size:  10px;
+		color:      var(--ev-green);
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		flex-shrink: 0;
+	}
+}
+
+.ev-wb-empty {
+	padding:    20px 10px;
+	text-align: center;
+	color:      var(--ev-text-muted);
+	font-size:  13px;
+	line-height: 1.6;
+}
+
+// ── Color palette popup — Excel 2007 / Windows 7 style ────────────────────────
 
 .ev-palette-popup {
 	position: absolute;
 	z-index: 1100;
-	background: var(--ev-cell-bg);
-	border: 1px solid var(--ev-header-border);
-	border-radius: 4px;
-	box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
-	padding: 8px;
+	background: #ffffff;
+	border: 1px solid #acacac;
+	box-shadow: 3px 3px 7px rgba(0, 0, 0, 0.24);
+	padding: 6px 6px 5px;
+	min-width: 194px;
+	border-radius: 1px;
+	font-family: Calibri, "Segoe UI", sans-serif;
+	font-size: 11px;
+	-webkit-user-select: none;
+	user-select: none;
 
 	&.hide { display: none; }
 }
 
-.ev-palette-grid {
-	display: grid;
-	grid-template-columns: repeat(10, 18px);
-	gap: 2px;
-	margin-bottom: 8px;
+// ── Section container + label ─────────────────────────────────────────────────
+
+.ev-pal-section {
+	margin-bottom: 2px;
 }
+
+.ev-pal-label {
+	display: block;
+	font-size: 11px;
+	font-weight: 700;
+	color: #3c3c3c;
+	margin-bottom: 4px;
+	padding: 0 1px;
+}
+
+.ev-pal-rule {
+	height: 1px;
+	background: #d8d8d8;
+	margin: 5px 0 4px;
+}
+
+// ── Swatch grid ───────────────────────────────────────────────────────────────
+
+.ev-pal-grid {
+	display: grid;
+	grid-template-columns: repeat(10, 17px);
+	gap: 1px;
+}
+
+// Recent section shown/hidden dynamically
+.ev-pal-recent-wrap {
+	&.hide { display: none; }
+}
+
+// ── Individual swatch — flat Windows 7 style (no scale transform) ─────────────
 
 .ev-swatch {
 	display: block;
-	width: 18px;
-	height: 18px;
-	border: 1px solid rgba(0, 0, 0, 0.18);
-	border-radius: 2px;
+	width: 17px;
+	height: 17px;
+	border: 1px solid rgba(0, 0, 0, 0.22);
 	cursor: pointer;
-	transition: transform 0.1s;
 	position: relative;
+	box-sizing: border-box;
 
 	&:hover {
-		transform: scale(1.25);
-		border-color: var(--ev-sel-border);
+		outline: 2px solid #1264a3;
+		outline-offset: 0;
 		z-index: 1;
 	}
 }
 
-.ev-palette-custom {
+// ── More Colors button ────────────────────────────────────────────────────────
+
+.ev-pal-more-btn {
 	display: flex;
 	align-items: center;
-	gap: 8px;
-	padding-top: 6px;
-	border-top: 1px solid var(--ev-grid-line);
+	gap: 5px;
+	width: 100%;
+	padding: 4px 3px;
+	border: none;
+	background: transparent;
+	cursor: pointer;
 	font-size: 11px;
-	color: var(--ev-text-muted);
+	font-family: Calibri, "Segoe UI", sans-serif;
+	color: #1a1a1a;
+	text-align: left;
+
+	&:hover {
+		background: #cce4f7;
+		color: #003e6b;
+	}
+
+	&:focus { outline: 1px dotted #666; }
 }
 
-.ev-custom-color {
-	width: 28px;
-	height: 22px;
-	padding: 1px;
-	border: 1px solid var(--ev-header-border);
-	border-radius: 3px;
-	cursor: pointer;
+// ── Custom color expand panel ─────────────────────────────────────────────────
+
+.ev-pal-custom-panel {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	padding: 5px 1px 1px;
+	border-top: 1px solid #d8d8d8;
+
+	&.hide { display: none; }
+
+	.ev-custom-color {
+		width: 22px;
+		height: 22px;
+		padding: 1px;
+		border: 1px solid #acacac;
+		cursor: pointer;
+		border-radius: 0;
+		flex-shrink: 0;
+	}
+
+	.ev-hex-input {
+		flex: 1;
+		min-width: 0;
+		height: 22px;
+		border: 1px solid #acacac;
+		padding: 0 4px;
+		font-size: 11px;
+		font-family: Consolas, "Courier New", monospace;
+		outline: none;
+		color: #1a1a1a;
+		background: #fff;
+
+		&:focus { border-color: #0078d7; }
+	}
+
+	.ev-hex-apply-btn {
+		height: 22px;
+		padding: 0 8px;
+		border: 1px solid #acacac;
+		background: linear-gradient(to bottom, #f5f5f5, #e1e1e1);
+		cursor: pointer;
+		font-size: 11px;
+		font-family: Calibri, "Segoe UI", sans-serif;
+		color: #1a1a1a;
+		flex-shrink: 0;
+		border-radius: 1px;
+
+		&:hover {
+			background: linear-gradient(to bottom, #dce8f5, #c5d9eb);
+			border-color: #0078d7;
+			color: #003e6b;
+		}
+	}
 }
 
 // ── Column headers: Excel letter + field name ──────────────────────────────────
@@ -840,7 +1119,71 @@
 		&.ev-active { background: rgba(18, 100, 163, 0.22); border-color: #1264a3; color: #4fc1e9; }
 	}
 
-	.ev-palette-popup { background: #252525; border-color: #444; }
+	// ── Workbook toolbar + dialog — dark mode ──────────────────────────────
+	.ev-wb-dropdown {
+		background:   #252525;
+		border-color: #555;
+		box-shadow:   2px 4px 8px rgba(0, 0, 0, 0.4);
+
+		.ev-wb-dd-item {
+			color: #d4d4d4;
+			&:hover { background: #1d3a4f; color: #4fc1e9; }
+		}
+	}
+
+	.ev-wb-row {
+		&:hover { background: rgba(255, 255, 255, 0.06); }
+		.ev-wb-row-title { color: #d4d4d4; }
+		.ev-wb-row-del:hover { background: #3a1818; color: #e06c6c; }
+
+		&.ev-wb-row--active {
+			background:   rgba(74, 144, 226, 0.15);
+			border-color: #4a90e2;
+			.ev-wb-row-title { color: #4a90e2; }
+			&:hover { background: rgba(74, 144, 226, 0.22); }
+		}
+		.ev-wb-active-check { color: #4a90e2; }
+	}
+
+	.ev-wb-section-label { color: #666; }
+	.ev-wb-empty         { color: #666; }
+
+	.ev-palette-popup {
+		background: #252525;
+		border-color: #555;
+		box-shadow: 3px 3px 7px rgba(0, 0, 0, 0.5);
+	}
+
+	.ev-pal-label { color: #c0c0c0; }
+	.ev-pal-rule  { background: #444; }
+
+	.ev-swatch {
+		border-color: rgba(255, 255, 255, 0.15);
+		&:hover { outline-color: #4fc1e9; }
+	}
+
+	.ev-pal-more-btn {
+		color: #d4d4d4;
+		&:hover { background: #1d3a4f; color: #4fc1e9; }
+	}
+
+	.ev-pal-custom-panel {
+		border-top-color: #444;
+
+		.ev-hex-input {
+			background: #1e1e1e;
+			border-color: #555;
+			color: #d4d4d4;
+			&:focus { border-color: #4fc1e9; }
+		}
+
+		.ev-hex-apply-btn {
+			background: linear-gradient(to bottom, #3a3a3a, #2d2d2d);
+			border-color: #555;
+			color: #d4d4d4;
+			&:hover { background: linear-gradient(to bottom, #1d3a4f, #1a3040); border-color: #4fc1e9; color: #4fc1e9; }
+		}
+	}
 
 	.ev-formula-help-popup {
 		background: #1e1e1e;
@@ -872,7 +1215,7 @@
 		}
 
 		tbody tr:hover td:not(.current):not(.area) {
-			background: #262626 !important;
+			background-color: var(--ev-cell-fill, #262626) !important;
 		}
 
 		.ht_clone_top .htColHeader.ht__active_highlight {
@@ -1139,4 +1482,125 @@
 			&:hover { background: #1d3829; }
 		}
 	}
+}
+
+// ── HOT scrollbars — always visible, styled like Excel ────────────────────────
+// HOT 6.x uses native browser scrollbars on .ht_master .wtHolder.
+// Override default thin/invisible overlay scrollbars.
+
+.ev-page .handsontable .ht_master .wtHolder {
+	scrollbar-width: thin;
+	scrollbar-color: #b0b0b0 transparent;
+
+	&::-webkit-scrollbar {
+		height: 9px;
+		width: 9px;
+	}
+
+	&::-webkit-scrollbar-track {
+		background: var(--ev-header-bg);
+	}
+
+	&::-webkit-scrollbar-thumb {
+		background: #b0b0b0;
+		border-radius: 3px;
+		border: 1px solid var(--ev-header-bg);
+
+		&:hover { background: #808080; }
+	}
+}
+
+[data-theme="dark"] .ev-page .handsontable .ht_master .wtHolder {
+	scrollbar-color: #555 #2d2d2d;
+
+	&::-webkit-scrollbar-track { background: #2d2d2d; }
+	&::-webkit-scrollbar-thumb {
+		background: #555;
+		border-color: #2d2d2d;
+		&:hover { background: #777; }
+	}
+}
+
+// ── Status Bar ────────────────────────────────────────────────────────────────
+// Fixed footer below the HOT grid.
+// Shows: [ A1:C5 ]  |  Count: 15  Sum: 1,24,820  Average: 8,321  Min: 399  Max: 39,900
+
+.ev-status-bar-container {
+	flex-shrink: 0;
+}
+
+.ev-status-bar {
+	display: flex;
+	align-items: center;
+	height: 28px;
+	padding: 0 12px;
+	background: var(--ev-header-bg);
+	border-top: 1px solid var(--ev-header-border);
+	font-family: var(--ev-font);
+	font-size: 11px;
+	color: var(--ev-text-muted);
+	-webkit-user-select: none;
+	user-select: none;
+	overflow: hidden;
+}
+
+// Cell address — monospace, slightly darker than stats
+.ev-sb-address {
+	font-family: var(--ev-font-mono);
+	font-size: 11px;
+	color: var(--ev-text);
+	min-width: 56px;
+	flex-shrink: 0;
+}
+
+// Vertical separator between address and stats
+.ev-sb-sep {
+	width: 1px;
+	height: 14px;
+	background: var(--ev-header-border);
+	margin: 0 10px;
+	flex-shrink: 0;
+}
+
+// Stats row
+.ev-sb-stats {
+	display: flex;
+	align-items: center;
+	flex-wrap: nowrap;
+	overflow: hidden;
+}
+
+// Individual stat: "Sum: 1,24,820"
+.ev-sb-stat {
+	display: inline-flex;
+	align-items: center;
+	white-space: nowrap;
+	padding: 0 2px;
+}
+
+// "Sum:", "Count:", etc.
+.ev-sb-label {
+	color: var(--ev-text-muted);
+	margin-right: 3px;
+}
+
+// Pipe character between stats
+.ev-sb-divider {
+	color: var(--ev-header-border);
+	margin: 0 8px;
+	font-size: 10px;
+}
+
+// Dark mode
+[data-theme="dark"] {
+	.ev-status-bar {
+		background: #1e1e1e;
+		border-top-color: #3c3c3c;
+		color: #8a8a8a;
+	}
+
+	.ev-sb-address { color: #cccccc; }
+	.ev-sb-sep     { background: #3c3c3c; }
+	.ev-sb-label   { color: #6e6e6e; }
+	.ev-sb-divider { color: #3c3c3c; }
 }

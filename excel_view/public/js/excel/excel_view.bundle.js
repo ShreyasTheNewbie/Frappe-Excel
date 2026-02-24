@@ -68,6 +68,8 @@ import "./components/column_manager.js";
 import "./components/formula_bar.js";
 import "./components/toolbar.js";
 import "./components/field_picker.js";
+import "./components/workbook_manager.js";  // V2.1 — Saved Workbooks
+import "./components/status_bar.js";        // V2.2 — Status Bar
 import "./components/excel_board.js";
 
 // ── 5. Signal that deps are ready ─────────────────────────────────────────────

@@ -1,0 +1,613 @@
+/**
+ * excel_view/components/workbook_manager.js
+ *
+ * Saved Workbooks — V2.1
+ *
+ * Responsibilities:
+ *   1. Serialize the current grid state into a plain config object.
+ *   2. Restore a previously saved config (columns, formula cols, filters, sort).
+ *   3. Persist configs to / from the `Excel Workbook` Frappe DocType via
+ *      the excel_view.api whitelist endpoints.
+ *   4. Bind the Save / Views toolbar buttons that toolbar.js renders.
+ *
+ * State saved per workbook:
+ *   columns_config  — ordered [{fieldname, width} | {key, label, is_formula_col, width}]
+ *   formula_columns — [{key, label, values: {doc_name: formula_or_value}}]
+ *   filters         — [[doctype, fieldname, op, value], ...]  (frappe filter_area.get() format)
+ *   sort_by         — {field, order}
+ *
+ * NOT saved (V2.1): format_store (cell styling) — row-index-based, meaningless
+ * after data reload.  Will move to doc+fieldname indexing in V3.
+ *
+ * Usage (instantiated by ExcelBoard):
+ *   this.workbook_manager = new frappe.views.excel.WorkbookManager({ board: this });
+ *   this.workbook_manager.setup();          // after toolbar.setup()
+ */
+
+frappe.provide("frappe.views.excel");
+
+frappe.views.excel.WorkbookManager = class WorkbookManager {
+	// ── Constructor ───────────────────────────────────────────────────────────
+
+	/**
+	 * @param {Object}  opts
+	 * @param {Object}  opts.board - ExcelBoard instance
+	 */
+	constructor({ board }) {
+		this.board    = board;
+		// Tracks the currently loaded/saved workbook.  null = unsaved new view.
+		this._current = null; // { name, title }
+		this._dropdown_open = false;
+	}
+
+	// ── Setup ─────────────────────────────────────────────────────────────────
+
+	setup() {
+		this._bind_toolbar_events();
+		this._auto_restore();
+	}
+
+	// ── Auto-restore last workbook on page load ────────────────────────────────
+
+	/**
+	 * If the user had a workbook loaded before the last page refresh,
+	 * silently re-apply it so columns + filters are consistent.
+	 *
+	 * We defer by one tick so ExcelBoard finishes its own setup first.
+	 */
+	_auto_restore() {
+		const saved = frappe.get_user_settings(this.board.doctype)?.excel_current_workbook;
+		if (!saved?.name) return;
+
+		// Re-apply after current JS call stack clears
+		setTimeout(() => {
+			this._load_workbook(saved.name, /* silent */ true);
+		}, 0);
+	}
+
+	// ── Toolbar event binding ─────────────────────────────────────────────────
+
+	_bind_toolbar_events() {
+		const $tb = $(this.board.toolbar);
+
+		// All toolbar events use the ".ev-wb" namespace so WorkbookManager.destroy()
+		// can reliably remove them via $tb.off(".ev-wb") even when the toolbar
+		// wrapper DOM element is reused across board destroy/recreate cycles.
+
+		// Save button (left part) — quick save
+		$tb.on("click.ev-wb", ".ev-wb-save-btn", (e) => {
+			e.stopPropagation();
+			this._close_dropdown();
+			this.save();
+		});
+
+		// Dropdown arrow — "Save As..." option
+		$tb.on("click.ev-wb", ".ev-wb-dropdown-arrow", (e) => {
+			e.stopPropagation();
+			this._toggle_dropdown();
+		});
+
+		// Dropdown items
+		$tb.on("click.ev-wb", ".ev-wb-dd-item", (e) => {
+			const action = $(e.currentTarget).data("action");
+			this._close_dropdown();
+			if (action === "save_as") this.save_as();
+		});
+
+		// Deselect button — clear active workbook
+		$tb.on("click.ev-wb", ".ev-wb-deselect-btn", (e) => {
+			e.stopPropagation();
+			this._deselect();
+		});
+
+		// Views button — open load dialog
+		$tb.on("click.ev-wb", ".ev-wb-views-btn", (e) => {
+			e.stopPropagation();
+			this._close_dropdown();
+			this.open_views_dialog();
+		});
+
+		// Close dropdown on outside click
+		$(document).on("click.ev-wb", () => this._close_dropdown());
+	}
+
+	_toggle_dropdown() {
+		const $dd = $(this.board.toolbar).find(".ev-wb-dropdown");
+		this._dropdown_open = !this._dropdown_open;
+		$dd.toggleClass("hide", !this._dropdown_open);
+	}
+
+	_close_dropdown() {
+		$(this.board.toolbar).find(".ev-wb-dropdown").addClass("hide");
+		this._dropdown_open = false;
+	}
+
+	// ── Save flow ─────────────────────────────────────────────────────────────
+
+	/**
+	 * Quick-save: auto-saves if a workbook is already loaded, otherwise prompts.
+	 */
+	save() {
+		if (this._current) {
+			this._persist(this._current.name, this._current.title);
+		} else {
+			this._prompt_title((title, is_public) => {
+				this._persist(null, title, is_public);
+			});
+		}
+	}
+
+	/**
+	 * Always prompts for a new title — "Save As..." behaviour.
+	 */
+	save_as() {
+		this._prompt_title((title, is_public) => {
+			this._persist(null, title, is_public);
+		}, this._current?.title);
+	}
+
+	_prompt_title(on_confirm, default_title = "") {
+		frappe.prompt(
+			[
+				{
+					fieldtype: "Data",
+					fieldname: "title",
+					label: __("View Name"),
+					reqd: 1,
+					default: default_title,
+				},
+				{
+					fieldtype: "Check",
+					fieldname: "is_public",
+					label: __("Share with everyone"),
+					default: 0,
+				},
+			],
+			({ title, is_public }) => on_confirm(title, is_public),
+			__("Save View"),
+			__("Save"),
+		);
+	}
+
+	/** Serialise current state and send to server. */
+	_persist(workbook_name, title, is_public = 0) {
+		const config = this.get_config();
+
+		frappe.call({
+			method: "excel_view.api.save_workbook",
+			args: {
+				title,
+				doctype_name:    this.board.doctype,
+				columns_config:  JSON.stringify(config.columns_config),
+				formula_columns: JSON.stringify(config.formula_columns),
+				filters:         JSON.stringify(config.filters),
+				sort_by:         JSON.stringify(config.sort_by),
+				is_public:       is_public ? 1 : 0,
+				workbook_name:   workbook_name || null,
+			},
+			freeze: false,
+			callback: (r) => {
+				const saved = r.message;
+				this._current = { name: saved.name, title: saved.title };
+				this._update_save_label(saved.title);
+				this._save_current_to_user_settings(saved.name, saved.title);
+				frappe.show_alert(
+					{ message: __('View "{0}" saved', [saved.title]), indicator: "green" },
+					3,
+				);
+			},
+			error: () => {
+				frappe.show_alert(
+					{ message: __("Failed to save view"), indicator: "red" },
+					3,
+				);
+			},
+		});
+	}
+
+	// ── Load flow ─────────────────────────────────────────────────────────────
+
+	/**
+	 * Open the "Open View" dialog listing all workbooks for the current DocType.
+	 */
+	open_views_dialog() {
+		frappe.call({
+			method: "excel_view.api.get_workbooks",
+			args: { doctype_name: this.board.doctype },
+			callback: (r) => this._show_views_dialog(r.message || []),
+		});
+	}
+
+	_show_views_dialog(workbooks) {
+		const me   = this;
+		const user = frappe.session.user;
+
+		const mine   = workbooks.filter(w => w.owner === user);
+		const shared = workbooks.filter(w => w.owner !== user && w.is_public);
+
+		// Mark the currently loaded workbook with a checkmark
+		const row_html = (w) => {
+			const is_current = me._current?.name === w.name;
+			return `
+			<div class="ev-wb-row${is_current ? " ev-wb-row--active" : ""}"
+				data-name="${frappe.utils.escape_html(w.name)}">
+				${is_current
+					? `<span class="ev-wb-active-check" title="${__("Currently loaded")}">✓</span>`
+					: `<svg class="ev-wb-row-icon" width="13" height="13" viewBox="0 0 16 16"
+							fill="currentColor" aria-hidden="true">
+							<rect x="1" y="1" width="4" height="14" rx="1"/>
+							<rect x="6" y="1" width="4" height="14" rx="1"/>
+							<rect x="11" y="1" width="4" height="14" rx="1"/>
+						</svg>`}
+				<span class="ev-wb-row-title">${frappe.utils.escape_html(w.title)}</span>
+				<span class="ev-wb-row-date">${frappe.datetime.prettyDate(w.modified)}</span>
+				${w.owner === user
+					? `<button class="ev-wb-row-del btn btn-xs"
+							data-name="${frappe.utils.escape_html(w.name)}"
+							title="${__("Delete")}">✕</button>`
+					: `<span class="ev-wb-row-shared">${__("shared")}</span>`}
+			</div>`;
+		};
+
+		let body_html = "";
+		if (mine.length) {
+			body_html += `<div class="ev-wb-section-label">${__("My Views")}</div>
+				<div class="ev-wb-list">${mine.map(row_html).join("")}</div>`;
+		}
+		if (shared.length) {
+			body_html += `<div class="ev-wb-section-label">${__("Shared Views")}</div>
+				<div class="ev-wb-list">${shared.map(row_html).join("")}</div>`;
+		}
+		if (!body_html) {
+			body_html = `<div class="ev-wb-empty">
+				${__("No saved views yet for {0}.", [this.board.doctype])}
+				<br><small>${__('Click "Save View" in the toolbar to create one.')}</small>
+			</div>`;
+		}
+
+		const d = new frappe.ui.Dialog({
+			title:               __("Open View — {0}", [this.board.doctype]),
+			fields:              [{ fieldtype: "HTML", fieldname: "wb_list", options: body_html }],
+			primary_action_label: __("Close"),
+			primary_action()     { d.hide(); },
+		});
+
+		// Use d.$body — the correct Frappe Dialog property for the modal body element.
+		// d.$wrapper.find(".frappe-dialog-body") can be empty before show(); d.$body is reliable.
+		const $body = d.$body;
+
+		// Load on row click (but not on delete button or its children)
+		$body.on("click", ".ev-wb-row", function (e) {
+			if ($(e.target).closest(".ev-wb-row-del").length) return;
+			const name = $(this).data("name");
+			d.hide();
+			me._load_workbook(name);
+		});
+
+		// Delete
+		$body.on("click", ".ev-wb-row-del", function (e) {
+			e.stopPropagation();
+			const name  = $(this).data("name");
+			const title = $(this).closest(".ev-wb-row").find(".ev-wb-row-title").text();
+			frappe.confirm(
+				__('Delete view "{0}"?', [title]),
+				() => {
+					frappe.call({
+						method:   "excel_view.api.delete_workbook",
+						args:     { name },
+						callback: () => {
+							$(this).closest(".ev-wb-row").remove();
+							frappe.show_alert(
+								{ message: __("View deleted"), indicator: "green" }, 2,
+							);
+							if (me._current?.name === name) {
+								me._current = null;
+								me._update_save_label(null);
+								me._save_current_to_user_settings(null, null);
+							}
+						},
+					});
+				},
+			);
+		});
+
+		d.show();
+	}
+
+	/** Fetch full workbook doc then apply its config.
+	 *  @param {string}  name   - Excel Workbook doc name
+	 *  @param {boolean} silent - if true, suppress the "loaded" alert (used on auto-restore)
+	 */
+	_load_workbook(name, silent = false) {
+		frappe.call({
+			method:   "excel_view.api.load_workbook",
+			args:     { name },
+			callback: (r) => {
+				const wb = r.message;
+				const config = {
+					columns_config:  this._parse_json(wb.columns_config,  []),
+					formula_columns: this._parse_json(wb.formula_columns, []),
+					filters:         this._parse_json(wb.filters,         []),
+					sort_by:         this._parse_json(wb.sort_by,         {}),
+				};
+
+				this._current = { name: wb.name, title: wb.title };
+				this._update_save_label(wb.title);
+
+				// Persist so the workbook survives a page refresh
+				this._save_current_to_user_settings(wb.name, wb.title);
+
+				// apply_config is async — await so filter+sort settle before refresh
+				this.apply_config(config).then(() => {
+					if (!silent) {
+						frappe.show_alert(
+							{ message: __('View "{0}" loaded', [wb.title]), indicator: "green" },
+							3,
+						);
+					}
+				});
+			},
+		});
+	}
+
+	/** Persist current workbook ref to user_settings (survives page refresh). */
+	_save_current_to_user_settings(name, title) {
+		frappe.model.user_settings.save(
+			this.board.doctype,
+			"excel_current_workbook",
+			name ? { name, title } : null,
+		);
+	}
+
+	// ── Serialise current state ───────────────────────────────────────────────
+
+	/**
+	 * Capture the complete grid state as a plain JSON-serialisable object.
+	 *
+	 * columns_config: ordered array of column descriptors.
+	 *   Regular field: { fieldname, width }
+	 *   Formula col:   { key, label, is_formula_col: true, width }
+	 *
+	 * formula_columns: per-doc values for formula columns (keyed by doc.name
+	 *   so they survive row reordering / re-pagination on restore).
+	 *   [{ key, label, values: { "DOC-001": "=B1*0.18", ... } }]
+	 *
+	 * filters: filter_area.get() format — [[doctype, fieldname, op, value], ...]
+	 *
+	 * sort_by: { field, order } from list_view.sort_by / sort_order.
+	 */
+	get_config() {
+		const board  = this.board;
+		const plugin = board.hot?.getPlugin("manualColumnResize");
+
+		// ── columns_config ─────────────────────────────────────────────────
+		const columns_config = board.columns.map((col, i) => {
+			const width = plugin?.columnWidthsMap?.get(i) ?? col.width ?? 140;
+			if (col._is_formula_col) {
+				return { key: col.data, label: col.title, is_formula_col: true, width };
+			}
+			return { fieldname: col.data, width };
+		});
+
+		// ── formula_columns ────────────────────────────────────────────────
+		// Save per-row values keyed by doc name so they survive data reload.
+		const formula_columns = board.columns
+			.filter(col => col._is_formula_col)
+			.map(col => {
+				const values = {};
+				(board.list_view.data || []).forEach(row => {
+					const v = row[col.data];
+					if (v != null && v !== "") values[row.name] = v;
+				});
+				return { key: col.data, label: col.title, values };
+			});
+
+		// ── filters ────────────────────────────────────────────────────────
+		// filter_area.get() returns filter objects; normalise to [dt, field, op, value] arrays.
+		let filters = [];
+		try {
+			filters = (board.list_view.filter_area?.get() ?? [])
+				.map(f => Array.isArray(f) ? f.slice(0, 4) : f);
+		} catch (_) { /* filter_area may not exist in all contexts */ }
+
+		// ── sort_by ────────────────────────────────────────────────────────
+		const sort_by = {
+			field: board.list_view.sort_by    || "modified",
+			order: board.list_view.sort_order || "desc",
+		};
+
+		return { columns_config, formula_columns, filters, sort_by };
+	}
+
+	// ── Restore state from config ─────────────────────────────────────────────
+
+	/**
+	 * Apply a workbook config to the live board.
+	 *
+	 * Returns a Promise so callers can await full completion.
+	 *
+	 * Sequence:
+	 *   1. Rebuild HOT columns from saved field list.
+	 *   2. Re-add formula columns + inject saved per-row values.
+	 *   3. Apply column widths.
+	 *   4. Await filter restoration (async — must complete before refresh).
+	 *   5. Set sort config.
+	 *   6. Force-refresh: bypass no_change throttle + fetch with new filters/sort.
+	 */
+	async apply_config(config) {
+		const board = this.board;
+
+		// ── 1. Regular field columns ───────────────────────────────────────
+		const regular_fieldnames = (config.columns_config || [])
+			.filter(c => !c.is_formula_col)
+			.map(c => c.fieldname)
+			.filter(Boolean);
+
+		if (regular_fieldnames.length) {
+			board.apply_field_selection(regular_fieldnames);
+		}
+
+		// ── 2. Re-add formula columns ──────────────────────────────────────
+		(config.formula_columns || []).forEach(fc => {
+			(board.list_view.data || []).forEach(row => {
+				row[fc.key] = fc.values?.[row.name] ?? "";
+			});
+			const new_col = {
+				data:            fc.key,
+				title:           fc.label,
+				type:            "text",
+				width:           140,
+				_is_formula_col: true,
+			};
+			board.columns.push(new_col);
+			board._master_columns.push(new_col);
+		});
+
+		if ((config.formula_columns || []).length) {
+			board.matrix = board.data_manager.to_matrix(board.list_view.data, board.columns);
+			board.formula_bridge.reload(board.matrix);
+			board.hot.updateSettings({ columns: board.columns });
+		}
+
+		// ── 3. Column widths ───────────────────────────────────────────────
+		const plugin = board.hot?.getPlugin("manualColumnResize");
+		if (plugin) {
+			(config.columns_config || []).forEach((cfg, i) => {
+				if (cfg.width) plugin.setManualSize(i, cfg.width);
+			});
+		}
+
+		// ── 4. Filters — MUST complete before calling refresh ──────────────
+		// Strategy: clear → set → then force-refresh.
+		// We null out last_args so no_change() never throttles a workbook load
+		// (e.g. if the user just cleared filters and the args are identical).
+		const fa = board.list_view.filter_area;
+		if (fa) {
+			try {
+				await fa.clear(false);
+				fa.filter_list?.update_filter_button?.();
+			} catch (err) {
+				console.error("[WorkbookManager] filter_area.clear failed:", err);
+			}
+
+			if ((config.filters || []).length) {
+				try {
+					await fa.set(config.filters);
+				} catch (err) {
+					// filter_area.set failed — fall back to direct filter_list insertion
+					console.error("[WorkbookManager] filter_area.set failed, using fallback:", err);
+					try {
+						const non_std = config.filters.filter(f => {
+							const condition = f[2];
+							return !(condition === "=" || condition === "like");
+						});
+						if (non_std.length) {
+							await fa.filter_list.add_filters(non_std);
+						}
+						const std = config.filters.filter(f => {
+							const condition = f[2];
+							const fieldname = f[1];
+							return (condition === "=" || condition === "like")
+								&& board.list_view.page.fields_dict[fieldname];
+						});
+						for (const f of std) {
+							const ctrl = board.list_view.page.fields_dict[f[1]];
+							if (ctrl) await ctrl.set_value(f[3]);
+						}
+					} catch (fb_err) {
+						console.error("[WorkbookManager] filter fallback also failed:", fb_err);
+					}
+				}
+			}
+		}
+
+		// ── 5. Sort ────────────────────────────────────────────────────────
+		if (config.sort_by?.field) {
+			board.list_view.sort_by    = config.sort_by.field;
+			board.list_view.sort_order = config.sort_by.order || "desc";
+		}
+
+		// ── 6. Force-refresh — bypass the 3-second no_change throttle ──────
+		// BaseList.no_change() compares JSON-stringified args to last_args.
+		// If the user just cleared filters (identical args), the refresh is
+		// silently skipped.  Nulling last_args forces a fresh fetch every time
+		// a workbook is loaded.
+		board.list_view.last_args = null;
+		board.list_view.start = 0;
+		board.list_view.refresh();
+	}
+
+	// ── Helpers ───────────────────────────────────────────────────────────────
+
+	/** Update the Save button label + show/hide the deselect × button. */
+	_update_save_label(title) {
+		const $tb = $(this.board.toolbar);
+		$tb.find(".ev-wb-save-label").text(
+			title
+				? (title.length > 22 ? title.slice(0, 20) + "…" : title)
+				: __("Save View"),
+		);
+		// Show × only when a workbook is active
+		$tb.find(".ev-wb-deselect-btn").toggleClass("hide", !title);
+	}
+
+	/**
+	 * Deselect the active workbook and reset grid to its default state:
+	 *   - Label → "Save View"
+	 *   - Columns → all doctype fields (list_view.fields = _get_all_meta_fields)
+	 *   - Filters → cleared
+	 *   - Refresh → fresh fetch with no filters
+	 *
+	 * Strategy: destroy the current board entirely so that the next render()
+	 * call creates a fresh ExcelBoard from list_view.fields.  This avoids
+	 * fighting HOT 6.x's internal column-count tracking (updateSettings alone
+	 * does not reliably resize the <colgroup> after loadData).
+	 *
+	 * The toolbar / formula-bar DOM wrappers are owned by ExcelView (setup_view)
+	 * and survive the board destroy; the new board re-renders into them.
+	 */
+	async _deselect() {
+		const board     = this.board;
+		const list_view = board.list_view; // save ref — board is about to be destroyed
+
+		// 1. Clear user-settings cache synchronously so the new board's
+		//    _auto_restore() sees null and doesn't reload the workbook.
+		this._current = null;
+		this._save_current_to_user_settings(null, null);
+
+		// 2. Clear filters
+		const fa = list_view.filter_area;
+		if (fa) {
+			try {
+				await fa.clear(false);
+				fa.filter_list?.update_filter_button?.();
+			} catch (err) {
+				console.error("[WorkbookManager] deselect clear failed:", err);
+			}
+		}
+
+		// 3. Destroy the board so render() recreates it with default columns.
+		//    Set excel_board = null first — render() checks this to decide
+		//    whether to create a new board or call board.refresh().
+		list_view.excel_board = null;
+		board.destroy(); // clears HOT, toolbar inner HTML, formula bar, event handlers
+
+		// 4. Force-refresh — bypass no_change throttle
+		list_view.last_args = null;
+		list_view.start = 0;
+		list_view.refresh();
+	}
+
+	_parse_json(str, fallback) {
+		try {
+			return str ? JSON.parse(str) : fallback;
+		} catch (_) {
+			return fallback;
+		}
+	}
+
+	destroy() {
+		$(document).off("click.ev-wb");
+		$(this.board.toolbar).off(".ev-wb");
+	}
+};

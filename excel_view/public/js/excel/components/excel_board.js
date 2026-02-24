@@ -69,6 +69,11 @@ frappe.views.ExcelBoard = class ExcelBoard {
 			});
 		}
 
+		// Workbook manager — handles Save / Load view persistence.
+		// Must be created before setup() so it can bind to toolbar buttons
+		// that toolbar_component.setup() renders.
+		this.workbook_manager = new frappe.views.excel.WorkbookManager({ board: this });
+
 		// 2. Build columns + matrix
 		this.columns = this.column_manager.get_columns();
 		// _master_columns is the authoritative list of ALL columns (visible + hidden).
@@ -80,13 +85,20 @@ frappe.views.ExcelBoard = class ExcelBoard {
 		// 3. Initialise formula engine
 		this.formula_bridge.init(this.matrix);
 
-		// 4. Render formula bar + toolbar
+		// 4. Render formula bar + toolbar, then set up workbook manager bindings
 		this.formula_bar_component.setup();
 		this.toolbar_component?.setup();
+		this.workbook_manager.setup(); // binds to toolbar buttons rendered above
 
 		// 5. Build HOT container and initialise
 		this._init_container();
 		this._init_hot();
+
+		// Status bar — after container is ready so $status_bar_container exists
+		this.status_bar = new frappe.views.excel.StatusBar({
+			board: this,
+			wrapper: this.$status_bar_container[0],
+		});
 
 		// 6. Keyboard shortcuts
 		this._bind_shortcuts();
@@ -98,10 +110,19 @@ frappe.views.ExcelBoard = class ExcelBoard {
 
 		this.$hot_container = $('<div class="ev-hot-container">').appendTo(this.$wrapper);
 
+		// Status bar — fixed footer below the grid
+		this.$status_bar_container = $('<div class="ev-status-bar-container">').appendTo(this.$wrapper);
+
 		// ResizeObserver — fires whenever the wrapper changes size (sidebar toggle,
 		// window resize, panel open/close). Debounced so rapid events don't pile up.
+		// Must also update HOT's height setting so scrollbars recalculate correctly.
 		this._resize_observer = new ResizeObserver(
-			frappe.utils.debounce(() => { this.hot?.render(); }, 60)
+			frappe.utils.debounce(() => {
+				if (!this.hot) return;
+				const h = this.$hot_container[0].clientHeight;
+				if (h > 0) this.hot.updateSettings({ height: h });
+				this.hot.render();
+			}, 60)
 		);
 		this._resize_observer.observe(this.$wrapper[0]);
 	}
@@ -118,7 +139,7 @@ frappe.views.ExcelBoard = class ExcelBoard {
 
 			// Behaviour
 			manualColumnResize: true,
-			manualRowResize: false,
+			manualRowResize: true,
 			columnSorting: true,
 			allowInsertRow: this.list_view.can_create,
 			allowRemoveRow: this.list_view.can_write,
@@ -127,17 +148,25 @@ frappe.views.ExcelBoard = class ExcelBoard {
 			search: true,
 			comments: true,
 			observeChanges: false,
+			// Keep selection alive when clicking toolbar buttons outside the grid.
+			// Default (true) clears selection on outside click → toolbar becomes a no-op.
+			outsideClickDeselects: false,
 
-			// AutoFilter
-			filters: true,
-			dropdownMenu: true,
+			// Column sort via dropdown — full autoFilter disabled; Frappe's sidebar
+		// handles filtering so we expose only sort_asc / sort_desc in the header menu.
+			filters: false,
+			dropdownMenu: ["sort_asc", "sort_desc"],
 
 			// Context menu (right-click)
 			contextMenu: this.context_menu.get_config(),
 
-			// Layout
-			height: "calc(100vh - 340px)",
-			stretchH: "all",
+			// Layout — flex child, so height: "100%" fills the ev-hot-container flex slot
+			height: "100%",
+			// "last" stretches only the final column to fill remaining space;
+			// all other columns keep their configured widths and a horizontal
+			// scrollbar appears when total width exceeds the container.
+			// "all" compresses columns proportionally — breaks with 20+ fields.
+			stretchH: "last",
 			wordWrap: false,
 			autoWrapRow: false,
 			autoWrapCol: false,
@@ -147,7 +176,7 @@ frappe.views.ExcelBoard = class ExcelBoard {
 
 			// Hooks
 			afterChange: (changes, source) => this._on_change(changes, source),
-			afterSelection: (r, c) => this._on_selection(r, c),
+			afterSelection: (r, c, r2, c2) => this._on_selection(r, c, r2, c2),
 			afterColumnResize: (col, size) => this._on_col_resize(col, size),
 			afterRender: () => this._on_render(),
 			afterRenderer: (TD, row, col, prop, value) => this._apply_cell_format(TD, row, col, value),
@@ -155,6 +184,16 @@ frappe.views.ExcelBoard = class ExcelBoard {
 			// i18n
 			language: frappe.boot.lang === "ar" || frappe.boot.lang === "he" ? "ar-AR" : undefined,
 		});
+
+		// HOT height:"100%" reads clientHeight at init time — in a flex layout that
+		// value may be 0 before the browser has painted. Force a correct pixel height
+		// after the next paint so HOT's scroll containers initialise properly.
+		setTimeout(() => {
+			if (!this.hot) return;
+			const h = this.$hot_container[0].clientHeight;
+			if (h > 0) this.hot.updateSettings({ height: h });
+			this.hot.render();
+		}, 0);
 	}
 
 	// ── Column header HTML ─────────────────────────────────────────────────────
@@ -218,6 +257,9 @@ frappe.views.ExcelBoard = class ExcelBoard {
 		}
 
 		// Apply stored per-cell formatting (bold, italic, color, etc.)
+		// Always reset fill var first — prevents stale colour from prev render
+		TD.style.removeProperty("--ev-cell-fill");
+
 		const fmt = this.format_store?.[`${row}:${col}`];
 		if (!fmt) return;
 
@@ -230,11 +272,12 @@ frappe.views.ExcelBoard = class ExcelBoard {
 		if (decs.length) TD.style.textDecoration = decs.join(" ");
 
 		if (fmt.color) TD.style.color = fmt.color;
-		if (fmt.bg) TD.style.backgroundColor = fmt.bg;
+		if (fmt.bg) TD.style.setProperty("--ev-cell-fill", fmt.bg);
 		if (fmt.align) TD.style.textAlign = fmt.align;
 		if (fmt.size) TD.style.fontSize = fmt.size + "px";
 		if (fmt.font) TD.style.fontFamily = fmt.font;
 		if (fmt.wrap) TD.style.whiteSpace = "normal";
+		TD.style.verticalAlign = fmt.valign || "middle";
 	}
 
 	// ── Event handlers ────────────────────────────────────────────────────────
@@ -342,9 +385,10 @@ frappe.views.ExcelBoard = class ExcelBoard {
 		}
 	}
 
-	_on_selection(row, col) {
+	_on_selection(row, col, row2, col2) {
 		this.formula_bar_component.update(row, col);
 		this.toolbar_component?.sync(row, col);
+		this.status_bar?.update(row, col, row2 ?? row, col2 ?? col);
 	}
 
 	_on_col_resize(col_index, new_width) {
@@ -361,6 +405,7 @@ frappe.views.ExcelBoard = class ExcelBoard {
 		const sel = this.hot.getSelectedLast();
 		if (sel) {
 			this.formula_bar_component.update(sel[0], sel[1]);
+			this.status_bar?.update(sel[0], sel[1], sel[2], sel[3]);
 		}
 	}
 
@@ -598,6 +643,36 @@ frappe.views.ExcelBoard = class ExcelBoard {
 		);
 	}
 
+	// ── Row height management ─────────────────────────────────────────────────
+
+	/**
+	 * Recalculate and apply row heights for the given row range based on
+	 * the maximum font size stored in format_store for that row.
+	 * Called by the toolbar after font size / bold / wrap changes.
+	 *
+	 * Formula: max_font_px * 1.6 + 4  (matches Excel's default line height ratio).
+	 * Minimum: 23px (HOT default row height).
+	 */
+	refresh_row_heights(r1 = 0, r2 = null) {
+		const total = this.hot?.countRows() ?? 0;
+		if (!total) return;
+		const end = r2 ?? total - 1;
+		const col_count = this.columns.length;
+		const plugin = this.hot.getPlugin("manualRowResize");
+		if (!plugin) return;
+
+		for (let r = r1; r <= end; r++) {
+			let max_size = 0;
+			for (let c = 0; c < col_count; c++) {
+				const size = this.format_store?.[`${r}:${c}`]?.size;
+				if (size && size > max_size) max_size = size;
+			}
+			const needed = max_size ? Math.ceil(max_size * 1.6) + 4 : 23;
+			plugin.setManualSize(r, Math.max(23, needed));
+		}
+		this.hot.render();
+	}
+
 	// ── Field picker ──────────────────────────────────────────────────────────
 
 	/**
@@ -626,9 +701,11 @@ frappe.views.ExcelBoard = class ExcelBoard {
 		this.matrix = this.data_manager.to_matrix(this.list_view.data, this.columns);
 		this.formula_bridge.reload(this.matrix);
 
-		// Push updated column config to HOT and re-render
+		// Push updated column config to HOT and do a full data reload.
+		// hot.render() alone doesn't rebuild the column DOM structure when
+		// the column *count* changes — loadData forces a proper re-init.
 		this.hot.updateSettings({ columns: this.columns });
-		this.hot.render();
+		this.hot.loadData(this.list_view.data);
 
 		frappe.show_alert({ message: __("Columns updated"), indicator: "green" }, 2);
 	}
@@ -661,6 +738,8 @@ frappe.views.ExcelBoard = class ExcelBoard {
 		this._resize_observer?.disconnect();
 		this.toolbar_component?.destroy();
 		this.formula_bar_component?.destroy();
+		this.status_bar?.destroy();
+		this.workbook_manager?.destroy();
 		this.hot?.destroy();
 		this.hot = null;
 		this.$wrapper?.empty();
