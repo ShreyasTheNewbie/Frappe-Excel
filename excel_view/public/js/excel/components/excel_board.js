@@ -34,6 +34,9 @@ frappe.views.ExcelBoard = class ExcelBoard {
 		this.columns = [];
 		// Sparse map of per-cell formatting: { "row:col": { bold, italic, ... } }
 		this.format_store = {};
+		// Snapshot of list_view.fields at board creation time so _deselect() can
+		// restore it after a workbook (which overwrites list_view.fields) is closed.
+		this._default_list_view_fields = [...(this.list_view.fields || [])];
 		this._setup();
 	}
 
@@ -245,6 +248,12 @@ frappe.views.ExcelBoard = class ExcelBoard {
 	 * Called by HOT's afterRenderer hook after each cell is drawn.
 	 */
 	_apply_cell_format(TD, row, col, value) {
+		// Join skeleton: shimmer animation while api.get_joined_data is in-flight
+		if (this.columns[col]?._is_join_loading) {
+			TD.classList.add("ev-cell-join-loading");
+			return;
+		}
+
 		// docstatus: render 0/1/2 as a coloured badge instead of raw number
 		if (this.columns[col]?._is_docstatus) {
 			const v = parseInt(value, 10);
@@ -907,6 +916,151 @@ frappe.views.ExcelBoard = class ExcelBoard {
 		this.hot.render();
 	}
 
+	// ── IntelliFlow — Join Canvas (V2.4) ─────────────────────────────────────
+
+	/**
+	 * Open the IntelliFlow visual join canvas overlay.
+	 * Replaces any previously open canvas instance.
+	 */
+	_open_join_canvas() {
+		this.join_canvas?.close();
+		this.join_canvas = new frappe.views.excel.JoinCanvas({ board: this });
+		// If a join config is already active (loaded workbook or previous Apply),
+		// pass it so the canvas opens with existing nodes/connections visible.
+		this.join_canvas.open(this._last_join_config || null);
+	}
+
+	/**
+	 * Inject joined rows (from api.get_joined_data) as read-only virtual columns.
+	 * Called by JoinCanvas after "Apply" completes, or by _reapply_join_from_config
+	 * after a workbook is loaded.
+	 *
+	 * @param {Object[]} joined_rows  - flat rows: [{name, "DocType__field": value, ...}]
+	 * @param {Object}   join_config  - the serialised join_config from the canvas
+	 */
+	_apply_join_result(joined_rows, join_config) {
+		// Persist for workbook save (WorkbookManager.get_config reads this).
+		// Stored WITHOUT base_names (those are dynamic per-session).
+		this._last_join_config = join_config;
+
+		// Clear skeleton loading flag — shimmer stops, afterRenderer no longer
+		// applies ev-cell-join-loading class.
+		this.columns.forEach(c => { if (c._is_join_loading) delete c._is_join_loading; });
+		this._master_columns.forEach(c => { if (c._is_join_loading) delete c._is_join_loading; });
+
+		// Build name → joined-field values lookup
+		const by_name = Object.fromEntries(joined_rows.map(r => [r.name, r]));
+
+		// Merge joined fields into every existing data row
+		this.list_view.data.forEach(doc => Object.assign(doc, by_name[doc.name] || {}));
+
+		// If the user selected specific base-node fields in the canvas, filter columns.
+		// Always keep: name col, formula cols, existing join cols, hidden-col metadata.
+		if (join_config.base_selected_fields?.length) {
+			const keep = new Set(join_config.base_selected_fields);
+			this.columns = this.columns.filter(c =>
+				c._is_join_col || c._is_formula_col || c._is_name_col ||
+				c.data === "name" || keep.has(c.data)
+			);
+			this._master_columns = [...this.columns];
+			this._hidden_col_keys.clear();
+		}
+
+		// Add/update a read-only virtual column for each selected field on each edge.
+		// If skeleton columns were pre-added by _add_join_skeleton_columns, we update
+		// their titles (now that meta is loaded) instead of adding duplicates.
+		const nodes_by_id = Object.fromEntries(join_config.nodes.map(n => [n.id, n]));
+		join_config.edges.forEach(edge => {
+			const tgt_node = nodes_by_id[edge.tgt_node_id];
+			if (!tgt_node) return;
+			edge.selected_fields.forEach(field => {
+				const key = `${tgt_node.doctype}__${field}`;
+				// Use Frappe meta label (e.g. "Date of Joining") instead of raw fieldname
+				const df = frappe.get_meta(tgt_node.doctype)?.fields?.find(f => f.fieldname === field);
+				const field_label = df?.label || field;
+				const title = `${tgt_node.doctype}: ${field_label}`;
+
+				const existing = this.columns.find(c => c.data === key);
+				if (existing) {
+					// Update label — skeleton may have used raw fieldname if meta wasn't ready
+					existing.title = title;
+					const master_existing = this._master_columns.find(c => c.data === key);
+					if (master_existing) master_existing.title = title;
+					return;
+				}
+				// Column wasn't pre-added (e.g. direct canvas Apply) — add it now
+				const col = {
+					data:          key,
+					title,
+					type:          "text",
+					width:         160,
+					readOnly:      true,
+					_readonly:     true,
+					_is_join_col:  true,
+				};
+				this.columns.push(col);
+				this._master_columns.push(col);
+			});
+		});
+
+		// Sync HyperFormula matrix + HOT
+		this.matrix = this.data_manager.to_matrix(this.list_view.data, this.columns);
+		this.formula_bridge.reload(this.matrix);
+		this.hot.updateSettings({ columns: this.columns });
+		this.hot.loadData(this.list_view.data);
+
+		frappe.show_alert({ message: __("Join applied"), indicator: "green" }, 2);
+	}
+
+	/**
+	 * Re-execute a join from a saved config (workbook restore or pending_join_config).
+	 * Called from refresh() when _pending_join_config is set after a workbook load.
+	 *
+	 * @param {Object} cfg - join_config (without base_names — those are rebuilt here)
+	 */
+	_reapply_join_from_config(cfg) {
+		if (this._destroyed) return;
+		const loaded_data = this.list_view.data || [];
+		if (!loaded_data.length || !cfg.edges?.length) return;
+
+		// Load meta for all target doctypes first (so labels work in _apply_join_result)
+		const tgt_doctypes = (cfg.nodes || [])
+			.filter(n => n.doctype !== this.doctype)
+			.map(n => n.doctype);
+
+		const _do_join = () => {
+			if (this._destroyed) return;
+			frappe.call({
+				method: "excel_view.api.get_joined_data",
+				args: {
+					base_doctype: this.doctype,
+					join_config:  JSON.stringify({
+						...cfg,
+						base_names: (this.list_view.data || []).map(d => d.name),
+					}),
+					limit: (this.list_view.data || []).length + 100,
+				},
+				freeze: false,
+				callback: (r) => {
+					if (this._destroyed) return;
+					this._apply_join_result(r.message || [], cfg);
+				},
+			});
+		};
+
+		if (!tgt_doctypes.length) {
+			_do_join();
+			return;
+		}
+		// Ensure all target DocType metas are loaded before applying (for column labels)
+		let pending = tgt_doctypes.length;
+		tgt_doctypes.forEach(dt => {
+			frappe.model.with_doctype(dt, () => {
+				if (--pending === 0) _do_join();
+			});
+		});
+	}
+
 	// ── Field picker ──────────────────────────────────────────────────────────
 
 	/**
@@ -918,9 +1072,16 @@ frappe.views.ExcelBoard = class ExcelBoard {
 
 	/**
 	 * Apply a new column selection from the field picker.
+	 *
 	 * @param {string[]} fieldnames - ordered array, always starts with "name"
+	 * @param {Object}  [opts]
+	 * @param {boolean} [opts.silent=false] - if true, skip the list_view.refresh()
+	 *   call.  Used by WorkbookManager.apply_config() which triggers its OWN single
+	 *   refresh at the end — suppressing the implicit refresh here avoids the race
+	 *   condition where two concurrent board.refresh() calls interleave and wipe the
+	 *   joined-row values that were just merged into list_view.data.
 	 */
-	apply_field_selection(fieldnames) {
+	apply_field_selection(fieldnames, { silent = false } = {}) {
 		// Rebuild column_manager's field list (name is added automatically by get_columns)
 		this.column_manager.fields = fieldnames
 			.filter(f => f !== "name")
@@ -942,6 +1103,8 @@ frappe.views.ExcelBoard = class ExcelBoard {
 			...this.column_manager.fields,
 		];
 
+		if (silent) return;
+
 		// Force a fresh data fetch — bypass no_change throttle.
 		// render() → board.refresh(data) will reload the matrix + HF + HOT data.
 		this.list_view.last_args = null;
@@ -962,6 +1125,77 @@ frappe.views.ExcelBoard = class ExcelBoard {
 		// don't show stale values after filters change or "Load More" fires.
 		frappe.views.excel.formula_manager?.clear();
 		this.hot.loadData(new_data);
+
+		// V2.4 — Re-apply join data whenever the grid refreshes.
+		//
+		// _pending_join_config: one-shot flag set by WorkbookManager.apply_config().
+		//   Shows skeleton columns immediately, then fetches real join data.
+		//
+		// _last_join_config: persists for the lifetime of the board after the first
+		//   Apply (or workbook load).  Frappe's idle auto-refresh calls
+		//   frappe.desk.reportview.get which returns only base-doctype rows — join
+		//   column values are wiped from every row.  We re-fetch silently here so
+		//   the grid never shows empty join cells after an idle refresh.
+		if (this._pending_join_config) {
+			const cfg = this._pending_join_config;
+			this._pending_join_config = null;
+			// Pre-add skeleton columns immediately — headers appear right away with
+			// a shimmer animation while the async API call runs in the background.
+			this._add_join_skeleton_columns(cfg);
+			// Defer the full re-apply (meta load + API call) one tick
+			setTimeout(() => this._reapply_join_from_config(cfg), 0);
+		} else if (this._last_join_config) {
+			// Subsequent refresh (idle auto-refresh, filter change, Load More…).
+			// Columns already exist — just re-fill row values from the API.
+			const cfg = this._last_join_config;
+			setTimeout(() => this._reapply_join_from_config(cfg), 0);
+		}
+	}
+
+	/**
+	 * Pre-add skeleton join columns synchronously from a saved join_config.
+	 * Columns appear instantly with a shimmer; real data fills them once
+	 * _reapply_join_from_config → _apply_join_result completes.
+	 *
+	 * @param {Object} cfg - join_config (nodes + edges with selected_fields)
+	 */
+	_add_join_skeleton_columns(cfg) {
+		if (!cfg?.edges?.length) return;
+		const nodes_by_id = Object.fromEntries((cfg.nodes || []).map(n => [n.id, n]));
+		let added = 0;
+
+		cfg.edges.filter(e => e.selected_fields?.length).forEach(edge => {
+			const tgt_node = nodes_by_id[edge.tgt_node_id];
+			if (!tgt_node) return;
+			edge.selected_fields.forEach(field => {
+				const key = `${tgt_node.doctype}__${field}`;
+				if (this.columns.find(c => c.data === key)) return; // already present
+				// Use meta label if the DocType is already in the cache, else raw name
+				const df = frappe.get_meta(tgt_node.doctype)?.fields?.find(f => f.fieldname === field);
+				const col = {
+					data:             key,
+					title:            `${tgt_node.doctype}: ${df?.label || field}`,
+					type:             "text",
+					width:            160,
+					readOnly:         true,
+					_readonly:        true,
+					_is_join_col:     true,
+					_is_join_loading: true,   // cleared by _apply_join_result
+				};
+				this.columns.push(col);
+				this._master_columns.push(col);
+				// Seed empty value so HOT rows have the key defined
+				(this.list_view.data || []).forEach(row => { row[key] = ""; });
+				added++;
+			});
+		});
+
+		if (added) {
+			this.matrix = this.data_manager.to_matrix(this.list_view.data, this.columns);
+			this.formula_bridge.reload(this.matrix);
+			this.hot.updateSettings({ columns: this.columns });
+			this.hot.loadData(this.list_view.data);
+		}
 	}
 
 	/**
@@ -976,6 +1210,9 @@ frappe.views.ExcelBoard = class ExcelBoard {
 	 * Called when navigating away from Excel View.
 	 */
 	destroy() {
+		this._destroyed = true;
+		this._last_join_config    = null;
+		this._pending_join_config = null;
 		$(document).off("keydown.ev");
 		this._resize_observer?.disconnect();
 		this.toolbar_component?.destroy();

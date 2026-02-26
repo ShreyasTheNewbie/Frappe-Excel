@@ -90,6 +90,22 @@ frappe.views.excel.ExcelToolbar = class ExcelToolbar {
 					</button>
 				</div>
 
+				<!-- Link Sheets — IntelliFlow join canvas -->
+				<div class="ev-tb-group">
+					<button class="ev-tb-btn ev-join-btn"
+						title="${__("Link Sheets — join data from another DocType")}">
+						<svg width="14" height="14" viewBox="0 0 16 16" fill="none"
+							stroke="currentColor" stroke-width="1.4" aria-hidden="true">
+							<circle cx="3" cy="8" r="2.2"/>
+							<circle cx="13" cy="3.5" r="2.2"/>
+							<circle cx="13" cy="12.5" r="2.2"/>
+							<line x1="5.1" y1="7.1" x2="10.9" y2="4.3"/>
+							<line x1="5.1" y1="8.9" x2="10.9" y2="11.7"/>
+						</svg>
+						${__("Link Sheets")}
+					</button>
+				</div>
+
 				<div class="ev-tb-sep"></div>
 
 				<!-- Font family -->
@@ -257,6 +273,11 @@ frappe.views.excel.ExcelToolbar = class ExcelToolbar {
 		// Choose Columns button
 		this.$toolbar.on("click", ".ev-columns-btn", () => {
 			this.board.open_field_picker();
+		});
+
+		// Link Sheets — IntelliFlow join canvas
+		this.$toolbar.on("click.ev-toolbar", ".ev-join-btn", () => {
+			this.board._open_join_canvas();
 		});
 
 		// Format toggle buttons (bold, italic, underline, strike, alignment, wrap)
