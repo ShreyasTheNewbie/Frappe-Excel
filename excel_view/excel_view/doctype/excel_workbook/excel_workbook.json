@@ -13,7 +13,8 @@
   "columns_config",
   "formula_columns",
   "filters",
-  "sort_by"
+  "sort_by",
+  "join_config"
  ],
  "fields": [
   {
@@ -66,6 +67,13 @@
    "fieldtype": "Code",
    "hidden": 1,
    "label": "Sort Config",
+   "options": "JSON"
+  },
+  {
+   "fieldname": "join_config",
+   "fieldtype": "Code",
+   "hidden": 1,
+   "label": "Join Config",
    "options": "JSON"
   }
  ],

@@ -50,19 +50,28 @@ frappe.views.excel.WorkbookManager = class WorkbookManager {
 	// ── Auto-restore last workbook on page load ────────────────────────────────
 
 	/**
-	 * If the user had a workbook loaded before the last page refresh,
-	 * silently re-apply it so columns + filters are consistent.
+	 * If the user had a workbook loaded (or the join canvas open) before the last
+	 * page refresh, silently re-apply them so the session is consistent.
 	 *
 	 * We defer by one tick so ExcelBoard finishes its own setup first.
 	 */
 	_auto_restore() {
-		const saved = frappe.get_user_settings(this.board.doctype)?.excel_current_workbook;
-		if (!saved?.name) return;
+		const settings = frappe.get_user_settings(this.board.doctype) || {};
 
-		// Re-apply after current JS call stack clears
-		setTimeout(() => {
-			this._load_workbook(saved.name, /* silent */ true);
-		}, 0);
+		// Re-apply the last active workbook after the current JS call stack clears
+		if (settings.excel_current_workbook?.name) {
+			setTimeout(() => {
+				this._load_workbook(settings.excel_current_workbook.name, /* silent */ true);
+			}, 0);
+		}
+
+		// Re-open the join canvas if it was open when the page was refreshed.
+		// Deferred by a slightly longer tick so the board + workbook restore settle first.
+		if (settings.excel_join_canvas_open) {
+			setTimeout(() => {
+				this.board._open_join_canvas();
+			}, 50);
+		}
 	}
 
 	// ── Toolbar event binding ─────────────────────────────────────────────────
@@ -146,6 +155,17 @@ frappe.views.excel.WorkbookManager = class WorkbookManager {
 		}, this._current?.title);
 	}
 
+	/**
+	 * Save the current grid state (including any active join config) under a
+	 * given title, without prompting.  Called by JoinCanvas after Apply.
+	 *
+	 * @param {string}  title     - name shown in the Views list
+	 * @param {number}  is_public - 1 = shared with everyone, 0 = private
+	 */
+	save_titled(title, is_public = 0) {
+		this._persist(null, title, is_public ? 1 : 0);
+	}
+
 	_prompt_title(on_confirm, default_title = "") {
 		frappe.prompt(
 			[
@@ -182,6 +202,7 @@ frappe.views.excel.WorkbookManager = class WorkbookManager {
 				formula_columns: JSON.stringify(config.formula_columns),
 				filters:         JSON.stringify(config.filters),
 				sort_by:         JSON.stringify(config.sort_by),
+				join_config:     JSON.stringify(config.join_config),
 				is_public:       is_public ? 1 : 0,
 				workbook_name:   workbook_name || null,
 			},
@@ -324,11 +345,29 @@ frappe.views.excel.WorkbookManager = class WorkbookManager {
 			args:     { name },
 			callback: (r) => {
 				const wb = r.message;
+
+				// Workbook was deleted externally — clear stale reference and bail out
+				if (wb?.not_found) {
+					if (this._current?.name === name) {
+						this._current = null;
+						this._update_save_label(null);
+					}
+					this._save_current_to_user_settings(null, null);
+					if (!silent) {
+						frappe.show_alert(
+							{ message: __("This view no longer exists"), indicator: "orange" },
+							4,
+						);
+					}
+					return;
+				}
+
 				const config = {
 					columns_config:  this._parse_json(wb.columns_config,  []),
 					formula_columns: this._parse_json(wb.formula_columns, []),
 					filters:         this._parse_json(wb.filters,         []),
 					sort_by:         this._parse_json(wb.sort_by,         {}),
+					join_config:     this._parse_json(wb.join_config,     null),
 				};
 
 				this._current = { name: wb.name, title: wb.title };
@@ -381,13 +420,17 @@ frappe.views.excel.WorkbookManager = class WorkbookManager {
 		const plugin = board.hot?.getPlugin("manualColumnResize");
 
 		// ── columns_config ─────────────────────────────────────────────────
+		// Join columns (_is_join_col) are intentionally excluded: they are not
+		// Frappe fieldnames and cannot be passed to apply_field_selection().
+		// They are re-added automatically after refresh via _reapply_join_from_config().
 		const columns_config = board.columns.map((col, i) => {
 			const width = plugin?.columnWidthsMap?.get(i) ?? col.width ?? 140;
 			if (col._is_formula_col) {
 				return { key: col.data, label: col.title, is_formula_col: true, width };
 			}
+			if (col._is_join_col) return null; // excluded — restored via join_config
 			return { fieldname: col.data, width };
-		});
+		}).filter(Boolean);
 
 		// ── formula_columns ────────────────────────────────────────────────
 		// Save per-row values keyed by doc name so they survive data reload.
@@ -416,7 +459,13 @@ frappe.views.excel.WorkbookManager = class WorkbookManager {
 			order: board.list_view.sort_order || "desc",
 		};
 
-		return { columns_config, formula_columns, filters, sort_by };
+		// ── join_config ────────────────────────────────────────────────
+		// Include the last applied IntelliFlow join config if one exists.
+		// board._last_join_config is set by _apply_join_result() and persists
+		// until the board is destroyed or a new workbook deselected.
+		const join_config = this.board._last_join_config || null;
+
+		return { columns_config, formula_columns, filters, sort_by, join_config };
 	}
 
 	// ── Restore state from config ─────────────────────────────────────────────
@@ -438,13 +487,17 @@ frappe.views.excel.WorkbookManager = class WorkbookManager {
 		const board = this.board;
 
 		// ── 1. Regular field columns ───────────────────────────────────────
+		// Use silent:true to suppress the implicit list_view.refresh() inside
+		// apply_field_selection.  apply_config's own step-6 refresh is the
+		// single authoritative fetch; two concurrent refreshes create a race
+		// condition where the second board.refresh() wipes joined-row values.
 		const regular_fieldnames = (config.columns_config || [])
 			.filter(c => !c.is_formula_col)
 			.map(c => c.fieldname)
 			.filter(Boolean);
 
 		if (regular_fieldnames.length) {
-			board.apply_field_selection(regular_fieldnames);
+			board.apply_field_selection(regular_fieldnames, { silent: true });
 		}
 
 		// ── 2. Re-add formula columns ──────────────────────────────────────
@@ -532,6 +585,14 @@ frappe.views.excel.WorkbookManager = class WorkbookManager {
 		// If the user just cleared filters (identical args), the refresh is
 		// silently skipped.  Nulling last_args forces a fresh fetch every time
 		// a workbook is loaded.
+
+		// If this workbook has a join config, schedule re-apply after the next
+		// board.refresh() call (which fires when the server returns data).
+		// _pending_join_config is consumed by ExcelBoard.refresh() exactly once.
+		if (config.join_config?.edges?.length) {
+			board._pending_join_config = config.join_config;
+		}
+
 		board.list_view.last_args = null;
 		board.list_view.start = 0;
 		board.list_view.refresh();
@@ -586,13 +647,21 @@ frappe.views.excel.WorkbookManager = class WorkbookManager {
 			}
 		}
 
-		// 3. Destroy the board so render() recreates it with default columns.
+		// 3. Restore the default list_view.fields.
+		//    apply_field_selection() (called from apply_config) overwrites
+		//    list_view.fields with only the workbook's columns.  Without this
+		//    restore the freshly-created board would show only those columns.
+		if (board._default_list_view_fields?.length) {
+			list_view.fields = [...board._default_list_view_fields];
+		}
+
+		// 4. Destroy the board so render() recreates it with default columns.
 		//    Set excel_board = null first — render() checks this to decide
 		//    whether to create a new board or call board.refresh().
 		list_view.excel_board = null;
 		board.destroy(); // clears HOT, toolbar inner HTML, formula bar, event handlers
 
-		// 4. Force-refresh — bypass no_change throttle
+		// 5. Force-refresh — bypass no_change throttle
 		list_view.last_args = null;
 		list_view.start = 0;
 		list_view.refresh();

@@ -1806,6 +1806,43 @@
 	}
 }
 
+// Join column skeleton — green-tinted shimmer while api.get_joined_data loads
+// Distinct from formula-loading (gray) so the user knows it's a join operation.
+.ev-page .htCore td.ev-cell-join-loading {
+	position: relative;
+	overflow: hidden;
+	color: transparent;   // hide empty placeholder value
+
+	&::after {
+		content: "";
+		position: absolute;
+		inset: 0;
+		width: 60%;
+		background: linear-gradient(
+			90deg,
+			transparent 0%,
+			color-mix(in srgb, var(--ev-green-light, #e2efda) 90%, transparent) 50%,
+			transparent 100%
+		);
+		will-change: transform;
+		animation: ev-shimmer 1.4s linear infinite;
+		pointer-events: none;
+	}
+}
+
+[data-theme="dark"] {
+	.ev-page .htCore td.ev-cell-join-loading {
+		&::after {
+			background: linear-gradient(
+				90deg,
+				transparent 0%,
+				rgba(29, 111, 66, 0.18) 50%,
+				transparent 100%
+			);
+		}
+	}
+}
+
 .ev-page .htCore td.ev-formula-perm {
 	color: var(--red-400, #e03131);
 	font-size: 10px;
@@ -1835,4 +1872,712 @@
 
 	.ev-page .htCore td.ev-formula-perm  { color: #f03e3e; }
 	.ev-page .htCore td.ev-formula-error { color: #fa5252; }
+}
+
+// ── IntelliFlow Join Canvas (V2.4) ────────────────────────────────────────────
+
+.ev-canvas-overlay {
+	position: fixed;
+	inset: 0;
+	z-index: 1500;
+	background: #fff;
+	display: flex;
+	flex-direction: column;
+
+	.frappe-dark-mode & {
+		background: #1a1a1a;
+	}
+}
+
+// Canvas header — Excel ribbon look
+.ev-jc-header {
+	height: 46px;
+	padding: 0 14px;
+	border-bottom: 2px solid var(--ev-green, #1d6f42);
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	flex-shrink: 0;
+	background: #fff;
+
+	.frappe-dark-mode & {
+		background: #1e1e1e;
+		border-bottom-color: var(--ev-green, #1d6f42);
+	}
+}
+
+.ev-jc-header-title {
+	font-size: 14px;
+	font-weight: 600;
+	color: var(--heading-color, #1a1a1a);
+	flex: 1;
+	// F1 — keep title on one line, truncate if very long
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	min-width: 0;
+}
+
+.ev-jc-header-dt {
+	font-weight: 400;
+	color: var(--text-muted, #888);
+	margin-left: 4px;
+}
+
+.ev-jc-header-actions {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+
+// Canvas stage — dotted grid background
+.ev-jc-stage {
+	flex: 1;
+	position: relative;
+	overflow: hidden;
+	background-color: #f8f9fa;
+	background-image: radial-gradient(circle, #d4d4d4 1px, transparent 0);
+	background-size: 24px 24px;
+
+	.frappe-dark-mode & {
+		background-color: #141414;
+		background-image: radial-gradient(circle, #333 1px, transparent 0);
+	}
+}
+
+// SVG edge layer — sits above stage but below node cards
+.ev-jc-svg {
+	position: absolute;
+	top: 0;
+	left: 0;
+	width: 100%;
+	height: 100%;
+	pointer-events: none;
+	overflow: visible;
+}
+
+// Node container
+.ev-jc-nodes {
+	position: absolute;
+	top: 0;
+	left: 0;
+	width: 100%;
+	height: 100%;
+}
+
+// Node card — Excel column-like appearance
+.ev-jc-node {
+	position: absolute;
+	width: 260px;
+	background: #fff;
+	border: 1px solid #c6c6c6;
+	border-radius: 3px;
+	box-shadow: 0 3px 12px rgba(0, 0, 0, 0.12), 0 1px 4px rgba(0, 0, 0, 0.06);
+	-webkit-user-select: none;
+	user-select: none;
+	max-height: 460px;
+	display: flex;
+	flex-direction: column;
+
+	.frappe-dark-mode & {
+		background: #252525;
+		border-color: #444;
+	}
+
+	// Base node: green Excel header
+	&.ev-jc-node--base > .ev-jc-node-header {
+		background: var(--ev-green, #1d6f42);
+		color: #fff;
+		border-radius: 2px 2px 0 0;
+
+		.ev-jc-node-title  { color: #fff; }
+		.ev-jc-node-count  { color: rgba(255,255,255,0.75); background: rgba(255,255,255,0.12); }
+		.ev-jc-node-count.ev-jc-node-count--active { color: #fff; background: rgba(255,255,255,0.22); }
+	}
+
+	// Non-base nodes: blue-gray Excel header
+	&:not(.ev-jc-node--base) > .ev-jc-node-header {
+		background: #1a4c97;
+		color: #fff;
+		border-radius: 2px 2px 0 0;
+
+		.ev-jc-node-title  { color: #fff; }
+		.ev-jc-node-remove { color: rgba(255,255,255,0.6); &:hover { color: #ffc0c0; } }
+		.ev-jc-node-count  { color: rgba(255,255,255,0.7); background: rgba(255,255,255,0.1); }
+		.ev-jc-node-count.ev-jc-node-count--active { color: #fff; background: rgba(255,255,255,0.2); }
+	}
+}
+
+.ev-jc-node-header {
+	padding: 7px 10px;
+	cursor: grab;
+	font-size: 12px;
+	font-weight: 600;
+	color: #fff;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	flex-shrink: 0;
+	min-height: 34px;
+
+	&:active { cursor: grabbing; }
+}
+
+.ev-jc-node-title {
+	flex: 1;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 12px;
+	letter-spacing: 0.2px;
+}
+
+.ev-jc-node-remove {
+	background: none;
+	border: none;
+	cursor: pointer;
+	color: rgba(255, 255, 255, 0.6);
+	font-size: 12px;
+	padding: 0 2px;
+	line-height: 1;
+	flex-shrink: 0;
+
+	&:hover { color: #ffc0c0; }
+}
+
+// Scrollable field list
+.ev-jc-node-fields {
+	overflow-y: auto;
+	max-height: 390px;
+	padding: 2px 0;
+
+	// Thin scrollbar
+	scrollbar-width: thin;
+	scrollbar-color: #ccc transparent;
+	&::-webkit-scrollbar { width: 5px; }
+	&::-webkit-scrollbar-thumb { background: #ccc; border-radius: 3px; }
+}
+
+// Individual field row — Excel row look
+.ev-jc-field {
+	display: flex;
+	align-items: center;
+	gap: 5px;
+	padding: 3px 8px;
+	font-size: 11.5px;
+	color: var(--text-color, #333);
+	position: relative;
+	min-height: 26px;
+	border-bottom: 1px solid transparent;
+
+	&:hover {
+		background: #eef4fb;
+		border-bottom-color: #c8ddf8;
+	}
+}
+
+.ev-jc-field-label {
+	flex: 1;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	font-size: 11.5px;
+}
+
+// Field selection checkbox + visual feedback
+.ev-field-select {
+	cursor: pointer;
+	flex-shrink: 0;
+	width: 13px;
+	height: 13px;
+	accent-color: var(--ev-green, #1d6f42);
+}
+
+// Field row highlight when checkbox is checked
+.ev-jc-field--selected {
+	background: rgba(29, 111, 66, 0.08) !important;
+
+	.ev-jc-field-label {
+		color: var(--ev-green, #1d6f42);
+		font-weight: 500;
+	}
+}
+
+// "N selected" badge in non-base node header
+.ev-jc-node-count {
+	font-size: 10px;
+	font-weight: 400;
+	color: var(--text-muted, #888);
+	background: var(--bg-color, #eee);
+	border-radius: 10px;
+	padding: 1px 7px;
+	white-space: nowrap;
+	flex-shrink: 0;
+	transition: background 0.15s, color 0.15s;
+	margin-right: 2px;
+
+	&.ev-jc-node-count--active {
+		background: rgba(29, 111, 66, 0.14);
+		color: var(--ev-green, #1d6f42);
+		font-weight: 600;
+	}
+
+	// Base node count badge: slightly different accent (blue-ish) to distinguish from join nodes
+	&.ev-jc-node-count--base.ev-jc-node-count--active {
+		background: rgba(26, 76, 151, 0.1);
+		color: #1a4c97;
+	}
+}
+
+// Workflow hint banner at the bottom of the stage
+.ev-jc-hint {
+	position: absolute;
+	bottom: 14px;
+	left: 50%;
+	transform: translateX(-50%);
+	background: rgba(255, 255, 255, 0.92);
+	border: 1px solid var(--border-color, #ddd);
+	border-radius: 6px;
+	padding: 6px 16px;
+	font-size: 11px;
+	color: var(--text-muted, #888);
+	white-space: nowrap;
+	pointer-events: none;
+	box-shadow: 0 1px 5px rgba(0, 0, 0, 0.08);
+	z-index: 2;
+
+	b { color: var(--text-color, #444); }
+
+	.frappe-dark-mode & {
+		background: rgba(25, 25, 25, 0.92);
+		border-color: #444;
+	}
+}
+
+// ── Port circles ─────────────────────────────────────────────────────────────
+
+.ev-port {
+	width: 10px;
+	height: 10px;
+	border-radius: 50%;
+	border: 2px solid #bbb;
+	background: #fff;
+	cursor: crosshair;
+	flex-shrink: 0;
+	transition: border-color 0.15s, background 0.15s;
+
+	.frappe-dark-mode & {
+		background: #252525;
+	}
+
+	&:hover {
+		border-color: var(--ev-green, #1d6f42);
+		background: var(--ev-green, #1d6f42);
+	}
+
+	&.ev-port--connected {
+		border-color: var(--ev-green, #1d6f42);
+		background: var(--ev-green, #1d6f42);
+	}
+}
+
+// ── SVG edge paths (styles are also set inline via JS) ────────────────────────
+
+.ev-jc-edge {
+	fill: none;
+	stroke-width: 2;
+	stroke-linecap: round;
+}
+
+.ev-jc-edge--pending {
+	stroke: #aaa;
+	stroke-dasharray: 5, 4;
+}
+
+// ── Confidence / error badges (absolutely positioned on the stage) ─────────────
+
+.ev-jc-badge {
+	position: absolute;
+	font-size: 10px;
+	padding: 2px 6px;
+	border-radius: 10px;
+	// Allow pointer events so the ✕ delink button is clickable
+	pointer-events: auto;
+	white-space: nowrap;
+	transform: translateX(-50%);
+	background: #e8f5e9;
+	color: #1d6f42;
+	border: 1px solid rgba(29, 111, 66, 0.2);
+	z-index: 10;
+	display: flex;
+	align-items: center;
+	gap: 4px;
+
+	&.ev-jc-badge--error {
+		background: #fdecea;
+		color: #e03e3e;
+		border-color: rgba(224, 62, 62, 0.2);
+		pointer-events: none; // error badges auto-remove; no button needed
+	}
+}
+
+// Delink (✕) button on valid edge badges
+.ev-jc-badge-remove {
+	background: none;
+	border: none;
+	padding: 0;
+	margin: 0;
+	font-size: 9px;
+	line-height: 1;
+	cursor: pointer;
+	color: rgba(29, 111, 66, 0.5);
+	opacity: 0;
+	transition: opacity 0.15s, color 0.15s;
+
+	.ev-jc-badge:hover & {
+		opacity: 1;
+	}
+
+	&:hover {
+		color: #e03e3e !important;
+	}
+}
+
+// ── F3: Frappe modals appear above canvas overlay (z-index: 1500) ────────────
+// body.ev-jc-open is set by JoinCanvas.open() and removed on close()
+
+body.ev-jc-open {
+	// Bootstrap/Frappe modal backdrop
+	.modal-backdrop {
+		z-index: 1600 !important;
+	}
+	// Bootstrap/Frappe modal dialog
+	.modal {
+		z-index: 1700 !important;
+	}
+}
+
+// ── Toolbar: Link Sheets button ───────────────────────────────────────────────
+
+.ev-join-btn {
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	gap: 5px;
+	font-size: 12px;
+
+	svg {
+		flex-shrink: 0;
+	}
+}
+
+// ── V2.4.5 AI features ────────────────────────────────────────────────────────
+
+// Port AI glow + pulse animation
+// Uses transform+opacity on ::after (compositor-only — no Paint cost)
+.ev-port[data-ai-score="high"] {
+	border-color: var(--ev-green);
+	background: rgba(29, 111, 66, 0.15);
+	position: relative;
+
+	&::after {
+		content: "";
+		position: absolute;
+		inset: -3px;
+		border-radius: 50%;
+		border: 2px solid var(--ev-green);
+		opacity: 0.8;
+		animation: ev-port-pulse 1s ease-out infinite;
+		will-change: transform, opacity;
+		pointer-events: none;
+	}
+}
+.ev-port[data-ai-score="mid"] {
+	border-color: #f0a500;
+	background: rgba(240, 165, 0, 0.15);
+}
+@keyframes ev-port-pulse {
+	0%   { transform: scale(1);   opacity: 0.8; }
+	100% { transform: scale(2);   opacity: 0; }
+}
+
+// Suggest panel
+// ── AI Suggest Drawer (V2.4.5) ─────────────────────────────────────────────
+// Slides in from the right of .ev-jc-stage (position:relative).
+// Stays open while user adds nodes one-by-one; has live search filter.
+
+// Active state for the ✨ AI header button
+.ev-jc-btn--active {
+	background: var(--ev-green) !important;
+	color: #fff !important;
+	border-color: var(--ev-green) !important;
+}
+
+.ev-jc-ai-drawer {
+	position: absolute;
+	top: 0;
+	right: 0;
+	height: 100%;
+	width: 296px;
+	display: flex;
+	flex-direction: column;
+	background: var(--fg-color);
+	border-left: 1px solid var(--border-color);
+	box-shadow: -6px 0 24px rgba(0, 0, 0, 0.10);
+	z-index: 20;
+	animation: ev-drawer-in 0.18s ease-out;
+}
+
+@keyframes ev-drawer-in {
+	from { transform: translateX(20px); opacity: 0; }
+	to   { transform: translateX(0);   opacity: 1; }
+}
+
+.ev-jc-ai-drawer-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 12px 14px 10px;
+	border-bottom: 1px solid var(--border-color);
+	flex-shrink: 0;
+}
+
+.ev-jc-ai-drawer-title {
+	display: flex;
+	flex-direction: column;
+	font-weight: 700;
+	font-size: 13px;
+}
+
+.ev-jc-ai-drawer-sub {
+	font-size: 10.5px;
+	font-weight: 400;
+	color: var(--text-muted);
+	margin-top: 1px;
+}
+
+.ev-jc-ai-drawer-head-actions {
+	display: flex;
+	gap: 4px;
+	align-items: center;
+}
+
+// "for: DocType (click ✨ on any node to change)"
+.ev-jc-ai-drawer-for {
+	padding: 5px 14px 5px;
+	font-size: 11px;
+	color: var(--text-muted);
+	border-bottom: 1px solid var(--border-color);
+	flex-shrink: 0;
+	line-height: 1.5;
+
+	strong { color: var(--text-color); }
+}
+
+.ev-jc-ai-drawer-for-hint {
+	display: block;
+	font-size: 10px;
+	opacity: 0.65;
+}
+
+// ✨ per-node AI target button
+.ev-jc-node-ai-target {
+	background: none;
+	border: none;
+	padding: 0 2px;
+	font-size: 11px;
+	line-height: 1;
+	cursor: pointer;
+	opacity: 0.3;
+	transition: opacity 0.12s;
+	flex-shrink: 0;
+
+	&:hover { opacity: 1; }
+}
+
+// Blue ring on the currently targeted node
+.ev-jc-node--ai-target {
+	outline: 2px solid var(--primary);
+	outline-offset: 2px;
+	border-radius: 7px;
+
+	.ev-jc-node-ai-target { opacity: 1; }
+}
+
+.ev-jc-ai-drawer-search-wrap {
+	padding: 8px 10px 6px;
+	border-bottom: 1px solid var(--border-color);
+	flex-shrink: 0;
+}
+
+.ev-jc-ai-drawer-search {
+	width: 100%;
+	height: 28px;
+	font-size: 12px;
+}
+
+.ev-jc-ai-drawer-body {
+	flex: 1;
+	overflow-y: auto;
+	padding: 6px 8px 12px;
+
+	// Thin custom scrollbar
+	&::-webkit-scrollbar       { width: 5px; }
+	&::-webkit-scrollbar-track { background: transparent; }
+	&::-webkit-scrollbar-thumb { background: #ccc; border-radius: 4px; }
+}
+
+// ── Suggestion card ──────────────────────────────────────────────────────────
+
+.ev-jc-ai-card {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 8px 8px 8px 0;
+	border: 1px solid var(--border-color);
+	border-radius: 6px;
+	background: var(--fg-color);
+	margin-bottom: 6px;
+	overflow: hidden;
+	transition: border-color 0.12s, box-shadow 0.12s;
+
+	&:hover:not(.ev-jc-card--added) {
+		border-color: var(--primary);
+		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+	}
+
+	&.ev-jc-card--added {
+		opacity: 0.45;
+	}
+}
+
+// Left-edge colour stripe (3px, flush to the card left)
+.ev-jc-card-stripe {
+	width: 3px;
+	align-self: stretch;
+	flex-shrink: 0;
+	border-radius: 0;
+
+	&--meta { background: var(--ev-green); }
+	&--ml   { background: #3b82f6; }
+}
+
+.ev-jc-card-body {
+	flex: 1;
+	min-width: 0;
+}
+
+.ev-jc-card-name {
+	font-weight: 600;
+	font-size: 12.5px;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	color: var(--text-color);
+}
+
+.ev-jc-card-via {
+	font-size: 10.5px;
+	color: var(--text-muted);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	margin-top: 2px;
+}
+
+.ev-jc-card-bar-wrap {
+	height: 2px;
+	background: #e5e7eb;
+	border-radius: 2px;
+	margin-top: 5px;
+	overflow: hidden;
+}
+
+.ev-jc-card-bar {
+	height: 100%;
+	border-radius: 2px;
+	background: var(--ev-green);
+	&--ml { background: #3b82f6; }
+}
+
+.ev-jc-card-actions {
+	display: flex;
+	flex-direction: column;
+	align-items: flex-end;
+	gap: 5px;
+	flex-shrink: 0;
+	padding-right: 8px;
+}
+
+.ev-jc-card-pct {
+	font-size: 10px;
+	font-weight: 700;
+	color: var(--text-muted);
+}
+
+.ev-jc-card-check {
+	color: var(--ev-green);
+	font-weight: 700;
+	font-size: 13px;
+}
+
+.ev-jc-card-add {
+	padding: 2px 8px !important;
+	font-size: 11px !important;
+	white-space: nowrap;
+}
+
+// Grade chips on edge badges
+.ev-jc-grade {
+	display: inline-block;
+	padding: 1px 5px;
+	border-radius: 3px;
+	font-weight: 700;
+	font-size: 10px;
+	line-height: 14px;
+	margin-right: 3px;
+}
+.ev-jc-grade--S {
+	background: #c3f0d0;
+	color: #0a5c30;
+}
+.ev-jc-grade--A {
+	background: #d4edda;
+	color: #155724;
+}
+.ev-jc-grade--B {
+	background: #fff3cd;
+	color: #856404;
+}
+.ev-jc-grade--C {
+	background: #fde8d8;
+	color: #7d3908;
+}
+.ev-jc-grade--D,
+.ev-jc-grade--F {
+	background: #fdecea;
+	color: #e03e3e;
+}
+
+// Association rules patterns table
+.ev-jc-patterns-table {
+	font-size: 12px;
+	width: 100%;
+
+	td {
+		vertical-align: middle;
+		padding: 5px 8px;
+	}
+
+	code {
+		background: #f3f4f6;
+		padding: 1px 4px;
+		border-radius: 3px;
+		font-size: 11px;
+	}
+
+	.ev-lift-high {
+		color: var(--ev-green);
+		font-weight: 700;
+	}
 }
