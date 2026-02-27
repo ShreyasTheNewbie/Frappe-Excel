@@ -203,6 +203,7 @@ frappe.views.excel.WorkbookManager = class WorkbookManager {
 				filters:         JSON.stringify(config.filters),
 				sort_by:         JSON.stringify(config.sort_by),
 				join_config:     JSON.stringify(config.join_config),
+				sheets:          JSON.stringify(config.sheets),
 				is_public:       is_public ? 1 : 0,
 				workbook_name:   workbook_name || null,
 			},
@@ -368,6 +369,7 @@ frappe.views.excel.WorkbookManager = class WorkbookManager {
 					filters:         this._parse_json(wb.filters,         []),
 					sort_by:         this._parse_json(wb.sort_by,         {}),
 					join_config:     this._parse_json(wb.join_config,     null),
+				sheets:          this._parse_json(wb.sheets,          null),
 				};
 
 				this._current = { name: wb.name, title: wb.title };
@@ -465,7 +467,13 @@ frappe.views.excel.WorkbookManager = class WorkbookManager {
 		// until the board is destroyed or a new workbook deselected.
 		const join_config = this.board._last_join_config || null;
 
-		return { columns_config, formula_columns, filters, sort_by, join_config };
+		// ── sheets (V2.5) ──────────────────────────────────────────────
+		// Save current base-sheet columns into sheet_manager before serializing
+		const sm = this.board.sheet_manager;
+		if (sm) sm.save_current_columns(columns_config, formula_columns, filters, sort_by);
+		const sheets = sm ? sm.serialize() : null;
+
+		return { columns_config, formula_columns, filters, sort_by, join_config, sheets };
 	}
 
 	// ── Restore state from config ─────────────────────────────────────────────
@@ -596,6 +604,12 @@ frappe.views.excel.WorkbookManager = class WorkbookManager {
 		board.list_view.last_args = null;
 		board.list_view.start = 0;
 		board.list_view.refresh();
+
+		// ── 7. Restore sheet tabs (V2.5) ─────────────────────────────────────────
+		// Deferred so list_view.refresh() gets its async fetch in flight first.
+		if (config.sheets?.length) {
+			setTimeout(() => board.sheet_manager?.restore(config.sheets), 50);
+		}
 	}
 
 	// ── Helpers ───────────────────────────────────────────────────────────────

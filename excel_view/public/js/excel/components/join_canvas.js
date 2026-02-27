@@ -83,6 +83,7 @@ frappe.views.excel.JoinCanvas = class JoinCanvas {
 				// V2.4.5 — show Patterns button if a join is already applied
 				if (initial_config?.edges?.filter(e => e.valid !== false).length) {
 					this.$overlay.find(".ev-jc-patterns-btn").show();
+					this.$overlay.find(".ev-jc-analyze-btn").show();
 				}
 			} else {
 				this._restore_from_user_settings();
@@ -143,6 +144,10 @@ frappe.views.excel.JoinCanvas = class JoinCanvas {
 						        title="${__("Discover business patterns in joined data")}">
 							📊 ${__("Patterns")}
 						</button>
+						<button class="btn btn-sm btn-default ev-jc-analyze-btn" style="display:none"
+						        title="${__("AI Analysis — anomaly detection and clustering on joined data")}">
+							🤖 ${__("Analyze")}
+						</button>
 						<button class="btn btn-sm btn-default ev-jc-close-btn">✕</button>
 					</div>
 				</div>
@@ -170,6 +175,8 @@ frappe.views.excel.JoinCanvas = class JoinCanvas {
 		this.$overlay.find(".ev-jc-ai-btn").on("click",       () => this._toggle_ai_discover());
 		this.$overlay.find(".ev-jc-path-btn").on("click",     () => this._run_find_path());
 		this.$overlay.find(".ev-jc-patterns-btn").on("click", () => this._run_pattern_mining());
+		// V2.5 AI Analysis button
+		this.$overlay.find(".ev-jc-analyze-btn").on("click",  () => this._open_analyze_panel());
 	}
 
 	// ── Node management ───────────────────────────────────────────────────────
@@ -203,12 +210,19 @@ frappe.views.excel.JoinCanvas = class JoinCanvas {
 		const id   = `node_${this._node_ctr++}`;
 		const meta = frappe.get_meta(doctype);
 
+		// Detect child table (istable=1 in Frappe meta)
+		const is_child = !!meta?.istable;
+
 		const SKIP_TYPES = new Set([
 			"Column Break", "Section Break", "Tab Break", "Fold",
 			"Heading", "HTML", "Custom HTML", "Table", "Table MultiSelect", "Password",
 		]);
+		// Child table system fields — not useful for joins/display
+		const CHILD_SYS_FIELDS = new Set(["parent", "parenttype", "parentfield", "idx"]);
+
 		const fields = (meta?.fields || []).filter(
 			df => !SKIP_TYPES.has(df.fieldtype) && !df.is_virtual && df.fieldname !== "name"
+				&& !(is_child && CHILD_SYS_FIELDS.has(df.fieldname))
 		);
 
 		// Auto-layout: cascade horizontally by 280px per node
@@ -217,7 +231,9 @@ frappe.views.excel.JoinCanvas = class JoinCanvas {
 		const top  = 60;
 
 		const node_el = document.createElement("div");
-		node_el.className = "ev-jc-node" + (base ? " ev-jc-node--base" : "");
+		node_el.className = "ev-jc-node"
+			+ (base ? " ev-jc-node--base" : "")
+			+ (is_child && !base ? " ev-jc-node--child" : "");
 		node_el.dataset.id = id;
 		node_el.style.left = left + "px";
 		node_el.style.top  = top  + "px";
@@ -227,6 +243,7 @@ frappe.views.excel.JoinCanvas = class JoinCanvas {
 		hdr.className = "ev-jc-node-header";
 		hdr.innerHTML = `
 			<span class="ev-jc-node-title">${frappe.utils.escape_html(doctype)}</span>
+			${is_child && !base ? `<span class="ev-jc-ct-badge" title="${__("Child Table")}">CT</span>` : ""}
 			<button class="ev-jc-node-ai-target" title="${__("AI suggest from this node")}">✨</button>
 			<span class="ev-jc-node-count${base ? " ev-jc-node-count--base" : ""}"
 			      title="${__("Fields selected for grid")}">0 ${__("selected")}</span>
@@ -268,16 +285,321 @@ frappe.views.excel.JoinCanvas = class JoinCanvas {
 			const pre_check = new Set(this.board.columns.map(c => c.data));
 			this._add_field_checkboxes(id, fields_div, pre_check);
 		} else {
-			// Non-base: remove button + empty checkboxes
+			// Non-base: wire remove button
 			hdr.querySelector(".ev-jc-node-remove")
 				?.addEventListener("click", (e) => {
 					e.stopPropagation();
 					this._remove_node(id);
 				});
-			this._add_field_checkboxes(id, fields_div, null);
+
+			if (is_child) {
+				// ── CT node: no per-row checkboxes; field rows kept for port dots ──
+				// Aggregate panel replaces Transform panel for CT nodes.
+				// _make_field_row already added port dots — checkboxes hidden via CSS.
+				this._add_aggregate_panel(node_el, id, doctype, fields);
+			} else {
+				// ── Regular non-base node: checkboxes + Transform panel ─────────
+				this._add_field_checkboxes(id, fields_div, null);
+
+				// ── Transform Panel (V2.5) ──────────────────────────────────────
+				this._add_transform_panel(node_el, id, doctype, fields);
+			}
 		}
 
 		return id;
+	}
+
+	/**
+	 * Append a collapsible Transform panel to a non-base node.
+	 * Panel contains: Row Filter rows + Computed Column rows.
+	 *
+	 * @param {HTMLElement} node_el   - the node container div
+	 * @param {string}      node_id   - stable node id
+	 * @param {string}      doctype   - node doctype
+	 * @param {Object[]}    meta_fields - frappe meta fields (for field dropdown)
+	 */
+	_add_transform_panel(node_el, node_id, doctype, meta_fields) {
+		const tf = document.createElement("div");
+		tf.className = "ev-jc-node-transform";
+		tf.dataset.nodeId = node_id;
+		tf.innerHTML = `
+			<div class="ev-jc-transform-header" tabindex="0">
+				<span class="ev-tf-title">🔧 ${__("Transform")}</span>
+				<span class="ev-jc-transform-badge ev-jc-transform-badge--hidden">0 ${__("rules")}</span>
+				<span class="ev-jc-transform-toggle">▸</span>
+			</div>
+			<div class="ev-jc-transform-body" style="display:none">
+				<div class="ev-tf-section-label">${__("Row Filter")}</div>
+				<div class="ev-tf-filters"></div>
+				<button class="ev-tf-add-filter btn btn-xs btn-default">+ ${__("Add Filter")}</button>
+				<div class="ev-tf-section-label" style="margin-top:8px">${__("Computed Column")}</div>
+				<div class="ev-tf-computed"></div>
+				<button class="ev-tf-add-computed btn btn-xs btn-default">+ ${__("Add Column")}</button>
+			</div>
+		`;
+		node_el.appendChild(tf);
+
+		// Toggle body on header click
+		const header_el = tf.querySelector(".ev-jc-transform-header");
+		const body_el   = tf.querySelector(".ev-jc-transform-body");
+		const toggle_el = tf.querySelector(".ev-jc-transform-toggle");
+		header_el.addEventListener("click", () => {
+			const open = body_el.style.display !== "none";
+			body_el.style.display = open ? "none" : "block";
+			toggle_el.textContent = open ? "▸" : "▾";
+		});
+
+		// "+ Add Filter" row
+		const filters_container   = tf.querySelector(".ev-tf-filters");
+		const computed_container  = tf.querySelector(".ev-tf-computed");
+		const badge_el            = tf.querySelector(".ev-jc-transform-badge");
+
+		const _update_badge = () => {
+			const f_count = filters_container.querySelectorAll(".ev-tf-filter-row").length;
+			const c_count = computed_container.querySelectorAll(".ev-tf-computed-row").length;
+			const total   = f_count + c_count;
+			badge_el.textContent = `${total} ${__("rules")}`;
+			badge_el.classList.toggle("ev-jc-transform-badge--hidden", total === 0);
+		};
+
+		tf.querySelector(".ev-tf-add-filter").addEventListener("click", (e) => {
+			e.stopPropagation();
+			this._add_filter_row(filters_container, meta_fields, _update_badge);
+		});
+		tf.querySelector(".ev-tf-add-computed").addEventListener("click", (e) => {
+			e.stopPropagation();
+			this._add_computed_row(computed_container, _update_badge);
+		});
+	}
+
+	/** Append one Row Filter row to the filters container. */
+	_add_filter_row(container, meta_fields, on_change, saved = null) {
+		const row = document.createElement("div");
+		row.className = "ev-tf-filter-row";
+
+		const field_opts = meta_fields.map(df =>
+			`<option value="${frappe.utils.escape_html(df.fieldname)}"
+			         ${saved?.field === df.fieldname ? "selected" : ""}>${frappe.utils.escape_html(df.label || df.fieldname)}</option>`
+		).join("");
+
+		const ops = ["=", "!=", ">", "<", ">=", "<=", "like", "in"];
+		const op_opts = ops.map(op =>
+			`<option value="${op}" ${saved?.op === op ? "selected" : ""}>${op}</option>`
+		).join("");
+
+		row.innerHTML = `
+			<select class="ev-tf-field form-control form-control-sm">${field_opts}</select>
+			<select class="ev-tf-op    form-control form-control-sm">${op_opts}</select>
+			<input  class="ev-tf-val   form-control form-control-sm"
+			        placeholder="${__("value")}" value="${frappe.utils.escape_html(saved?.value || "")}">
+			<button class="ev-tf-row-del btn btn-xs" title="${__("Remove")}">×</button>
+		`;
+		row.querySelector(".ev-tf-row-del").addEventListener("click", () => {
+			row.remove();
+			on_change?.();
+		});
+		container.appendChild(row);
+		on_change?.();
+	}
+
+	/** Append one Computed Column row to the computed container. */
+	_add_computed_row(container, on_change, saved = null) {
+		const key = saved?.key || `_computed_${Date.now()}`;
+		const row = document.createElement("div");
+		row.className = "ev-tf-computed-row";
+		row.dataset.key = key;
+		row.innerHTML = `
+			<input class="ev-tf-col-label form-control form-control-sm"
+			       placeholder="${__("Column label")}" value="${frappe.utils.escape_html(saved?.label || "")}">
+			<textarea class="ev-tf-col-expr form-control form-control-sm" rows="2"
+			          placeholder="${__('e.g. "Senior" if years_of_experience > 5 else "Junior"')}">${frappe.utils.escape_html(saved?.expr || "")}</textarea>
+			<button class="ev-tf-row-del btn btn-xs" title="${__("Remove")}">×</button>
+		`;
+		row.querySelector(".ev-tf-row-del").addEventListener("click", () => {
+			row.remove();
+			on_change?.();
+		});
+		container.appendChild(row);
+		on_change?.();
+	}
+
+	/** Read Transform panel state for a node → {row_filter, computed_cols}. */
+	_get_node_transform_config(node_id) {
+		const node_el = this.nodes.get(node_id)?.el;
+		if (!node_el) return { row_filter: [], computed_cols: [] };
+
+		const tf = node_el.querySelector(".ev-jc-node-transform");
+		if (!tf) return { row_filter: [], computed_cols: [] };
+
+		const row_filter = [...tf.querySelectorAll(".ev-tf-filter-row")].map(r => ({
+			field: r.querySelector(".ev-tf-field")?.value || "",
+			op:    r.querySelector(".ev-tf-op")?.value    || "=",
+			value: r.querySelector(".ev-tf-val")?.value   || "",
+		})).filter(f => f.field);
+
+		const computed_cols = [...tf.querySelectorAll(".ev-tf-computed-row")].map(r => ({
+			key:   r.dataset.key || `_col_${Math.random().toString(36).slice(2)}`,
+			label: r.querySelector(".ev-tf-col-label")?.value || "",
+			expr:  r.querySelector(".ev-tf-col-expr")?.value  || "",
+		})).filter(c => c.label && c.expr);
+
+		return { row_filter, computed_cols };
+	}
+
+	/** Restore Transform panel UI from saved config (called in _restore_from_config). */
+	_restore_transform_panel(node_id, transform_cfg, meta_fields) {
+		const node_el = this.nodes.get(node_id)?.el;
+		if (!node_el || !transform_cfg) return;
+
+		const tf = node_el.querySelector(".ev-jc-node-transform");
+		if (!tf) return;
+
+		const filters_container  = tf.querySelector(".ev-tf-filters");
+		const computed_container = tf.querySelector(".ev-tf-computed");
+		const badge_el           = tf.querySelector(".ev-jc-transform-badge");
+
+		const _update_badge = () => {
+			const total = filters_container.querySelectorAll(".ev-tf-filter-row").length
+			            + computed_container.querySelectorAll(".ev-tf-computed-row").length;
+			badge_el.textContent = `${total} ${__("rules")}`;
+			badge_el.classList.toggle("ev-jc-transform-badge--hidden", total === 0);
+		};
+
+		(transform_cfg.row_filter || []).forEach(f =>
+			this._add_filter_row(filters_container, meta_fields, _update_badge, f)
+		);
+		(transform_cfg.computed_cols || []).forEach(c =>
+			this._add_computed_row(computed_container, _update_badge, c)
+		);
+
+		// Auto-expand panel if there are rules
+		const total = (transform_cfg.row_filter?.length || 0) + (transform_cfg.computed_cols?.length || 0);
+		if (total > 0) {
+			tf.querySelector(".ev-jc-transform-body").style.display = "block";
+			tf.querySelector(".ev-jc-transform-toggle").textContent = "▾";
+		}
+	}
+
+	// ── CT Aggregate Panel ────────────────────────────────────────────────────
+	// Replaces Transform panel on child-table nodes.
+	// Each row = one aggregated output column: func(field) → 1 row per parent record.
+
+	/**
+	 * Append the Aggregate panel to a CT node.
+	 * @param {HTMLElement} node_el    - node container div
+	 * @param {string}      node_id    - stable node id
+	 * @param {string}      doctype    - CT doctype name
+	 * @param {Object[]}    meta_fields - filtered Frappe meta fields
+	 */
+	_add_aggregate_panel(node_el, node_id, doctype, meta_fields) {
+		const ag = document.createElement("div");
+		ag.className  = "ev-jc-node-aggregate";
+		ag.dataset.nodeId = node_id;
+		ag.innerHTML = `
+			<div class="ev-jc-agg-header">
+				<span class="ev-jc-agg-title">📊 ${__("Aggregate")}</span>
+				<span class="ev-jc-agg-badge ev-jc-agg-badge--hidden">0 ${__("cols")}</span>
+			</div>
+			<div class="ev-jc-agg-body">
+				<div class="ev-jc-agg-rows"></div>
+				<button class="ev-jc-agg-add btn btn-xs btn-default">+ ${__("Add Column")}</button>
+				<div class="ev-jc-agg-hint">
+					${__("Each row becomes one aggregated column (1 result row per parent record).")}
+				</div>
+			</div>
+		`;
+		node_el.appendChild(ag);
+
+		const rows_container = ag.querySelector(".ev-jc-agg-rows");
+		const badge_el       = ag.querySelector(".ev-jc-agg-badge");
+		const count_el       = node_el.querySelector(".ev-jc-node-count");
+
+		const _update = () => {
+			const n = rows_container.querySelectorAll(".ev-jc-agg-row").length;
+			badge_el.textContent = `${n} ${__("cols")}`;
+			badge_el.classList.toggle("ev-jc-agg-badge--hidden", n === 0);
+			if (count_el) {
+				count_el.textContent = n + " " + __("agg.");
+				count_el.classList.toggle("ev-jc-node-count--active", n > 0);
+			}
+		};
+
+		ag.querySelector(".ev-jc-agg-add").addEventListener("click", (e) => {
+			e.stopPropagation();
+			this._add_aggregate_row(rows_container, meta_fields, _update);
+		});
+
+		_update(); // init badge
+	}
+
+	/** Append one Aggregate row to the rows container. */
+	_add_aggregate_row(container, meta_fields, on_change, saved = null) {
+		const row = document.createElement("div");
+		row.className = "ev-jc-agg-row";
+
+		// Include "name" as a COUNT candidate + all meta fields
+		const all_fields = [{ fieldname: "name", label: "Name (ID)" }, ...meta_fields];
+		const field_opts = all_fields.map(df =>
+			`<option value="${frappe.utils.escape_html(df.fieldname)}"
+			         ${saved?.field === df.fieldname ? "selected" : ""}>
+				${frappe.utils.escape_html(df.label || df.fieldname)}
+			</option>`
+		).join("");
+
+		const FUNCS    = ["SUM", "COUNT", "AVG", "MIN", "MAX"];
+		const func_opts = FUNCS.map(f =>
+			`<option value="${f}" ${saved?.func === f ? "selected" : ""}>${f}</option>`
+		).join("");
+
+		row.innerHTML = `
+			<select class="ev-jc-agg-field form-control form-control-sm">${field_opts}</select>
+			<select class="ev-jc-agg-func  form-control form-control-sm">${func_opts}</select>
+			<button class="ev-jc-agg-del btn btn-xs" title="${__("Remove")}">×</button>
+		`;
+		row.querySelector(".ev-jc-agg-del").addEventListener("click", () => {
+			row.remove();
+			on_change?.();
+		});
+		container.appendChild(row);
+		on_change?.();
+	}
+
+	/** Read Aggregate panel state → [{field, func}] or null if no rows. */
+	_get_node_aggregate_config(node_id) {
+		const ag = this.nodes.get(node_id)?.el?.querySelector(".ev-jc-node-aggregate");
+		if (!ag) return null;
+
+		const cols = [...ag.querySelectorAll(".ev-jc-agg-row")].map(r => ({
+			field: r.querySelector(".ev-jc-agg-field")?.value || "",
+			func:  r.querySelector(".ev-jc-agg-func")?.value  || "SUM",
+		})).filter(c => c.field);
+
+		return cols.length ? cols : null;
+	}
+
+	/** Restore Aggregate panel from saved config. */
+	_restore_aggregate_panel(node_id, agg_cols, meta_fields) {
+		if (!agg_cols?.length) return;
+		const node_el = this.nodes.get(node_id)?.el;
+		if (!node_el) return;
+		const ag = node_el.querySelector(".ev-jc-node-aggregate");
+		if (!ag) return;
+
+		const rows_container = ag.querySelector(".ev-jc-agg-rows");
+		const badge_el       = ag.querySelector(".ev-jc-agg-badge");
+		const count_el       = node_el.querySelector(".ev-jc-node-count");
+
+		const _update = () => {
+			const n = rows_container.querySelectorAll(".ev-jc-agg-row").length;
+			badge_el.textContent = `${n} ${__("cols")}`;
+			badge_el.classList.toggle("ev-jc-agg-badge--hidden", n === 0);
+			if (count_el) {
+				count_el.textContent = n + " " + __("agg.");
+				count_el.classList.toggle("ev-jc-node-count--active", n > 0);
+			}
+		};
+
+		agg_cols.forEach(c => this._add_aggregate_row(rows_container, meta_fields, _update, c));
 	}
 
 	/** Set a node as the AI suggestion target — highlights it and refreshes open drawer. */
@@ -399,6 +721,8 @@ frappe.views.excel.JoinCanvas = class JoinCanvas {
 		);
 		this.nodes.get(node_id)?.el.remove();
 		this.nodes.delete(node_id);
+		// Persist updated layout (node removed)
+		this._auto_save_layout();
 	}
 
 	_delete_edge(edge) {
@@ -426,6 +750,8 @@ frappe.views.excel.JoinCanvas = class JoinCanvas {
 			node_el.onpointerup = () => {
 				node_el.onpointermove = null;
 				node_el.onpointerup   = null;
+				// Save updated node positions after drag
+				this._auto_save_layout();
 			};
 		});
 	}
@@ -553,6 +879,8 @@ frappe.views.excel.JoinCanvas = class JoinCanvas {
 					this._show_edge_badge(edge, res);
 					// Mark connected ports as green
 					this._mark_ports_connected(edge);
+					// Persist layout so refresh restores this canvas state
+					this._auto_save_layout();
 				} else if (res.method === "type_mismatch") {
 					// V2.4.5 — type incompatibility: instant red alert + immediate removal
 					frappe.show_alert({ message: res.message, indicator: "red" }, 5);
@@ -966,18 +1294,40 @@ frappe.views.excel.JoinCanvas = class JoinCanvas {
 			base_doctype:         this.board.doctype,
 			base_selected_fields: base_selected,
 			node_positions,
-			nodes: [...this.nodes.values()].map(n => ({ id: n.id, doctype: n.doctype })),
+			nodes: [...this.nodes.values()].map(n => {
+				const base_node_cfg = { id: n.id, doctype: n.doctype };
+				if (n.doctype !== this.board.doctype) {
+					// CT nodes carry aggregate_cols; regular nodes carry transform config
+					const agg = this._get_node_aggregate_config(n.id);
+					if (agg) {
+						base_node_cfg.aggregate_cols = agg;
+					} else {
+						const tf = this._get_node_transform_config(n.id);
+						if (tf.row_filter.length || tf.computed_cols.length) {
+							base_node_cfg.row_filter    = tf.row_filter;
+							base_node_cfg.computed_cols = tf.computed_cols;
+						}
+					}
+				}
+				return base_node_cfg;
+			}),
 			edges: this.edges
 				.filter(e => e.valid === true)
 				.map(e => {
 					const tgt_node = this.nodes.get(e.tgt_node_id);
+					// CT aggregate nodes: selected_fields = agg field names
+					// (used by preview check and workbook serialisation; SQL ignores it)
+					const agg = this._get_node_aggregate_config(e.tgt_node_id);
+					const selected_fields = agg
+						? agg.map(c => c.field)
+						: [...(tgt_node?.selected_fields || [])];
 					return {
 						id:              e.id,
 						src_node_id:     e.src_node_id,
 						src_field:       e.src_field,
 						tgt_node_id:     e.tgt_node_id,
 						tgt_field:       e.tgt_field,
-						selected_fields: [...(tgt_node?.selected_fields || [])],
+						selected_fields,
 						confidence:      e.confidence,
 						method:          e.method,
 					};
@@ -1002,6 +1352,28 @@ frappe.views.excel.JoinCanvas = class JoinCanvas {
 			"excel_join_config",
 			save_cfg,
 		);
+	}
+
+	/**
+	 * Auto-save canvas layout to user_settings without requiring Apply.
+	 * Called after every structural change (valid edge, node remove, node drag).
+	 * Preserves nodes + positions + aggregate/transform config so refresh
+	 * restores the exact canvas the user last worked on.
+	 */
+	_auto_save_layout() {
+		const has_non_base = [...this.nodes.values()]
+			.some(n => n.doctype !== this.board.doctype);
+		if (has_non_base) {
+			// Save current canvas (nodes + positions + edges + agg/transform config)
+			this._save_to_user_settings(this.get_join_config());
+		} else {
+			// All non-base nodes removed — explicitly clear so refresh starts clean
+			frappe.model.user_settings.save(
+				this.board.doctype,
+				"excel_join_config",
+				null,
+			);
+		}
 	}
 
 	/**
@@ -1121,6 +1493,29 @@ frappe.views.excel.JoinCanvas = class JoinCanvas {
 								}
 							});
 						});
+
+					// Restore Aggregate panel (CT) or Transform panel (regular) — V2.5+
+					if (cfg_node.aggregate_cols?.length || cfg_node.row_filter?.length || cfg_node.computed_cols?.length) {
+						const meta    = frappe.get_meta(cfg_node.doctype);
+						const is_ct   = !!meta?.istable;
+						const SKIP    = new Set([
+							"Column Break", "Section Break", "Tab Break", "Fold",
+							"Heading", "HTML", "Custom HTML", "Table", "Table MultiSelect", "Password",
+						]);
+						const CHILD_SYS = new Set(["parent", "parenttype", "parentfield", "idx"]);
+						const mfs = (meta?.fields || []).filter(
+							df => !SKIP.has(df.fieldtype) && !df.is_virtual && df.fieldname !== "name"
+								&& !(is_ct && CHILD_SYS.has(df.fieldname))
+						);
+						if (cfg_node.aggregate_cols?.length) {
+							this._restore_aggregate_panel(new_id, cfg_node.aggregate_cols, mfs);
+						} else {
+							this._restore_transform_panel(new_id, {
+								row_filter:    cfg_node.row_filter    || [],
+								computed_cols: cfg_node.computed_cols || [],
+							}, mfs);
+						}
+					}
 				}
 
 
@@ -1180,25 +1575,28 @@ frappe.views.excel.JoinCanvas = class JoinCanvas {
 		const make_card = (s) => {
 			const pct         = Math.round(s.score * 100);
 			const is_meta     = s.method === "meta";
+			const is_ct       = s.method === "child_table";
 			const is_added    = added.has(s.doctype);
 			const via         = s.src_field !== "name"
 				? `${s.src_field} → ${s.tgt_field}`
 				: `via ${s.tgt_field}`;
+			const stripe_cls  = is_ct ? "child_table" : (is_meta ? "meta" : "ml");
 			return `
 				<div class="ev-jc-ai-card${is_added ? " ev-jc-card--added" : ""}"
 				     data-doctype="${frappe.utils.escape_html(s.doctype)}">
-					<div class="ev-jc-card-stripe ev-jc-card-stripe--${is_meta ? "meta" : "ml"}"></div>
+					<div class="ev-jc-card-stripe ev-jc-card-stripe--${stripe_cls}"></div>
 					<div class="ev-jc-card-body">
 						<div class="ev-jc-card-name"
 						     title="${frappe.utils.escape_html(s.doctype)}">
 							${frappe.utils.escape_html(s.doctype)}
+							${is_ct ? `<span class="ev-jc-ct-badge ev-jc-ct-badge--card" title="${__("Child Table")}">CT</span>` : ""}
 						</div>
 						<div class="ev-jc-card-via"
 						     title="${frappe.utils.escape_html(s.reason)}">
 							${frappe.utils.escape_html(via)}
 						</div>
 						<div class="ev-jc-card-bar-wrap">
-							<div class="ev-jc-card-bar${is_meta ? "" : " ev-jc-card-bar--ml"}"
+							<div class="ev-jc-card-bar${is_meta || is_ct ? "" : " ev-jc-card-bar--ml"}"
 							     style="width:${pct}%"></div>
 						</div>
 					</div>
@@ -1212,10 +1610,13 @@ frappe.views.excel.JoinCanvas = class JoinCanvas {
 		};
 
 		const meta_count  = suggestions.filter(s => s.method === "meta").length;
-		const ml_count    = suggestions.length - meta_count;
-		const count_label = meta_count
-			? `${meta_count} Link${ml_count ? ` · ${ml_count} ML` : ""}`
-			: `${ml_count} ML`;
+		const ct_count    = suggestions.filter(s => s.method === "child_table").length;
+		const ml_count    = suggestions.filter(s => s.method === "ml").length;
+		const count_label = [
+			meta_count ? `${meta_count} Link` : "",
+			ct_count   ? `${ct_count} CT`     : "",
+			ml_count   ? `${ml_count} ML`     : "",
+		].filter(Boolean).join(" · ") || "0";
 		const for_dt      = this._get_ai_doctype();
 
 		const $drawer = $(`
@@ -1436,6 +1837,211 @@ frappe.views.excel.JoinCanvas = class JoinCanvas {
 				}
 				this._show_patterns_dialog(rules);
 			},
+		});
+	}
+
+	// ── V2.5 AI Analysis Panel ────────────────────────────────────────────────
+
+	/**
+	 * Open the AI Analysis panel (Anomaly Detection + Clustering).
+	 * Right-side drawer appended to this.$stage, same pattern as AI Discover drawer.
+	 * Uses current board.list_view.data (post-Apply joined rows).
+	 */
+	_open_analyze_panel() {
+		const data = this.board.list_view.data || [];
+		if (!data.length) {
+			frappe.show_alert({ message: __("Apply a join first to populate data for analysis"), indicator: "orange" }, 4);
+			return;
+		}
+
+		// Remove any existing panel
+		this.$stage.find(".ev-jc-analyze-drawer").remove();
+
+		// Detect numeric fields from the first row
+		const sample = data[0] || {};
+		const numeric_fields = Object.keys(sample).filter(k => {
+			if (k.startsWith("_")) return false;
+			const v = sample[k];
+			return typeof v === "number" || (typeof v === "string" && v !== "" && !isNaN(Number(v)));
+		});
+
+		if (!numeric_fields.length) {
+			frappe.show_alert({ message: __("No numeric columns found in joined data for analysis"), indicator: "orange" }, 4);
+			return;
+		}
+
+		const field_opts = numeric_fields.map(f =>
+			`<label class="ev-ai-field-cb">
+				<input type="checkbox" value="${frappe.utils.escape_html(f)}" checked>
+				${frappe.utils.escape_html(f)}
+			</label>`
+		).join("");
+
+		const drawer = document.createElement("div");
+		drawer.className = "ev-jc-analyze-drawer";
+		drawer.innerHTML = `
+			<div class="ev-jc-analyze-header">
+				<span>🤖 ${__("AI Analysis")}</span>
+				<button class="ev-jc-analyze-close btn btn-xs">✕</button>
+			</div>
+			<div class="ev-jc-analyze-tabs">
+				<button class="ev-jc-atab active" data-tab="anomaly">${__("Anomaly Detection")}</button>
+				<button class="ev-jc-atab"         data-tab="cluster">${__("Clustering")}</button>
+			</div>
+
+			<div class="ev-jc-atab-body" data-tab="anomaly">
+				<div class="ev-ai-label">${__("Numeric columns to analyze:")}</div>
+				<div class="ev-ai-fields">${field_opts}</div>
+				<div class="ev-ai-label">${__("Contamination (anomaly fraction):")}</div>
+				<input type="range" class="ev-ai-contamination" min="5" max="30" value="10" step="1">
+				<span class="ev-ai-contam-val">10%</span>
+				<button class="btn btn-sm btn-primary ev-ai-run-anomaly" style="margin-top:8px;width:100%">
+					${__("Run Anomaly Detection")}
+				</button>
+				<div class="ev-ai-result-anomaly"></div>
+			</div>
+
+			<div class="ev-jc-atab-body" data-tab="cluster" style="display:none">
+				<div class="ev-ai-label">${__("Numeric columns to analyze:")}</div>
+				<div class="ev-ai-fields">${field_opts.replace(/ checked/g, "")}</div>
+				<div class="ev-ai-label">${__("Number of clusters:")}</div>
+				<select class="ev-ai-k-select form-control form-control-sm" style="width:auto">
+					<option value="0">${__("Auto (silhouette)")}</option>
+					${[2,3,4,5,6].map(k => `<option value="${k}">${k}</option>`).join("")}
+				</select>
+				<button class="btn btn-sm btn-primary ev-ai-run-cluster" style="margin-top:8px;width:100%">
+					${__("Run Clustering")}
+				</button>
+				<div class="ev-ai-result-cluster"></div>
+			</div>
+		`;
+		this.$stage[0].appendChild(drawer);
+
+		// Close button
+		drawer.querySelector(".ev-jc-analyze-close").addEventListener("click", () => {
+			drawer.remove();
+		});
+
+		// Tab switching
+		drawer.querySelectorAll(".ev-jc-atab").forEach(btn => {
+			btn.addEventListener("click", () => {
+				drawer.querySelectorAll(".ev-jc-atab").forEach(b => b.classList.remove("active"));
+				btn.classList.add("active");
+				const tab = btn.dataset.tab;
+				drawer.querySelectorAll(".ev-jc-atab-body").forEach(body => {
+					body.style.display = body.dataset.tab === tab ? "block" : "none";
+				});
+			});
+		});
+
+		// Contamination slider label
+		const slider = drawer.querySelector(".ev-ai-contamination");
+		const label  = drawer.querySelector(".ev-ai-contam-val");
+		slider.addEventListener("input", () => { label.textContent = `${slider.value}%`; });
+
+		// ── Run Anomaly Detection ──────────────────────────────────────────
+		drawer.querySelector(".ev-ai-run-anomaly").addEventListener("click", () => {
+			const selected = [...drawer.querySelectorAll(".ev-jc-atab-body[data-tab=anomaly] .ev-ai-field-cb input:checked")]
+				.map(cb => cb.value);
+			if (!selected.length) {
+				frappe.show_alert({ message: __("Select at least one numeric column"), indicator: "orange" }, 3);
+				return;
+			}
+			const contamination = parseInt(slider.value) / 100;
+			const result_el = drawer.querySelector(".ev-ai-result-anomaly");
+			result_el.innerHTML = `<div class="ev-ai-spinner">⏳ ${__("Running…")}</div>`;
+
+			frappe.call({
+				method: "excel_view.api.detect_anomalies",
+				args: {
+					rows:             JSON.stringify(data),
+					numeric_fields:   JSON.stringify(selected),
+					contamination,
+				},
+				callback: (r) => {
+					const enriched = r.message || [];
+					if (!enriched.length) {
+						result_el.innerHTML = `<div class="ev-ai-info">${__("Not enough data (min 5 rows)")}</div>`;
+						return;
+					}
+					// Inject anomaly columns into board data
+					enriched.forEach((row, i) => {
+						if (data[i]) {
+							data[i]._anomaly_score = row._anomaly_score;
+							data[i]._is_anomaly    = row._is_anomaly;
+						}
+					});
+					this.board.hot?.render();
+
+					const anomaly_count = enriched.filter(r => r._is_anomaly).length;
+					result_el.innerHTML = `
+						<div class="ev-ai-info ev-ai-info--success">
+							${__("Found {0} anomalous rows ({1}% threshold)", [
+								anomaly_count,
+								Math.round(contamination * 100),
+							])}
+						</div>
+						<div class="ev-ai-info" style="font-size:11px;color:var(--text-muted)">
+							${__("Rows highlighted in red in the grid.")}
+						</div>
+					`;
+				},
+				error: () => {
+					result_el.innerHTML = `<div class="ev-ai-info ev-ai-info--error">${__("Analysis failed — check that scikit-learn is installed")}</div>`;
+				},
+			});
+		});
+
+		// ── Run Clustering ─────────────────────────────────────────────────
+		drawer.querySelector(".ev-ai-run-cluster").addEventListener("click", () => {
+			const selected = [...drawer.querySelectorAll(".ev-jc-atab-body[data-tab=cluster] .ev-ai-field-cb input:checked")]
+				.map(cb => cb.value);
+			if (!selected.length) {
+				frappe.show_alert({ message: __("Select at least one numeric column"), indicator: "orange" }, 3);
+				return;
+			}
+			const k = parseInt(drawer.querySelector(".ev-ai-k-select").value);
+			const result_el = drawer.querySelector(".ev-ai-result-cluster");
+			result_el.innerHTML = `<div class="ev-ai-spinner">⏳ ${__("Running…")}</div>`;
+
+			frappe.call({
+				method: "excel_view.api.cluster_data",
+				args: {
+					rows:           JSON.stringify(data),
+					numeric_fields: JSON.stringify(selected),
+					n_clusters:     k,
+				},
+				callback: (r) => {
+					const result = r.message || {};
+					const enriched = result.rows || [];
+					if (!enriched.length) {
+						result_el.innerHTML = `<div class="ev-ai-info">${__("Not enough data (min 6 rows)")}</div>`;
+						return;
+					}
+					// Inject cluster column into board data
+					enriched.forEach((row, i) => {
+						if (data[i]) data[i]._cluster = row._cluster;
+					});
+					this.board.hot?.render();
+
+					const k_used = result.n_clusters;
+					const summary = result.summary || [];
+					const summary_html = summary.map(s => {
+						const centroid_vals = selected.map(f => `${f}: <b>${s[f]?.toFixed(2) ?? "–"}</b>`).join(", ");
+						return `<li>Cluster ${s.cluster}: ${centroid_vals}</li>`;
+					}).join("");
+
+					result_el.innerHTML = `
+						<div class="ev-ai-info ev-ai-info--success">
+							${__("Grouped into {0} clusters. Column _cluster added to grid.", [k_used])}
+						</div>
+						<ul class="ev-ai-summary" style="font-size:11px;margin-top:6px">${summary_html}</ul>
+					`;
+				},
+				error: () => {
+					result_el.innerHTML = `<div class="ev-ai-info ev-ai-info--error">${__("Clustering failed — check that scikit-learn is installed")}</div>`;
+				},
+			});
 		});
 	}
 

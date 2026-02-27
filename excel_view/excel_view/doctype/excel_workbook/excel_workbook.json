@@ -14,7 +14,8 @@
   "formula_columns",
   "filters",
   "sort_by",
-  "join_config"
+  "join_config",
+  "sheets"
  ],
  "fields": [
   {
@@ -74,6 +75,13 @@
    "fieldtype": "Code",
    "hidden": 1,
    "label": "Join Config",
+   "options": "JSON"
+  },
+  {
+   "fieldname": "sheets",
+   "fieldtype": "Code",
+   "hidden": 1,
+   "label": "Sheets",
    "options": "JSON"
   }
  ],

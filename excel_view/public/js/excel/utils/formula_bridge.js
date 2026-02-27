@@ -62,6 +62,48 @@ frappe.views.excel.FormulaBridge = class FormulaBridge {
 		this.hf.setSheetContent(this.sheet_id, this._prepare_for_hf(matrix));
 	}
 
+	// ── Multi-sheet support (V2.5) ────────────────────────────────────────
+
+	/**
+	 * Register a new HyperFormula sheet for a tab.
+	 * @param {string} label - Sheet tab label (used as HF sheet name)
+	 * @returns {number} hf_sheet_id
+	 */
+	add_hf_sheet(label) {
+		if (!this.hf) return 0;
+		// Ensure unique sheet name
+		const name = this._unique_sheet_name(label);
+		this.hf.addSheet(name);
+		return this.hf.getSheetId(name);
+	}
+
+	/**
+	 * Switch the active sheet (all address lookups use this.sheet_id).
+	 * @param {number} hf_id
+	 */
+	set_active_sheet(hf_id) {
+		this.sheet_id = hf_id;
+	}
+
+	/**
+	 * Load data into a specific HF sheet (used on tab switch when data arrives).
+	 * @param {number} hf_id
+	 * @param {Array[]} matrix
+	 */
+	reload_for_sheet(hf_id, matrix) {
+		if (!this.hf) return;
+		this.hf.setSheetContent(hf_id, this._prepare_for_hf(matrix || []));
+	}
+
+	_unique_sheet_name(label) {
+		let name = label || "Sheet";
+		let i = 2;
+		while (this.hf.getSheetId(name) !== undefined) {
+			name = `${label} ${i++}`;
+		}
+		return name;
+	}
+
 	/**
 	 * Apply HOT afterChange changes to HF for re-evaluation.
 	 * @param {Array[]} changes - HOT changes: [[row, col, oldVal, newVal], ...]

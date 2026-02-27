@@ -75,6 +75,7 @@ import "./components/field_picker.js";
 import "./components/workbook_manager.js";  // V2.1 — Saved Workbooks
 import "./components/status_bar.js";        // V2.2 — Status Bar
 import "./components/join_canvas.js";       // V2.4 — IntelliFlow Join Canvas
+import "./components/sheet_manager.js";    // V2.5 — Multi-Sheet Workbooks
 import "./components/excel_board.js";
 
 // ── 5. Signal that deps are ready ─────────────────────────────────────────────

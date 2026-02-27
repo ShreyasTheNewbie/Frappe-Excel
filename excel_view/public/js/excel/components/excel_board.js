@@ -115,7 +115,11 @@ frappe.views.ExcelBoard = class ExcelBoard {
 			wrapper: this.$status_bar_container[0],
 		});
 
-		// 6. Keyboard shortcuts
+		// 6. Sheet tabs (V2.5) — setup after HOT and status bar exist
+		this.sheet_manager = new frappe.views.excel.SheetManager({ board: this });
+		this.sheet_manager.setup();
+
+		// 7. Keyboard shortcuts
 		this._bind_shortcuts();
 	}
 
@@ -190,7 +194,19 @@ frappe.views.ExcelBoard = class ExcelBoard {
 			autoWrapCol: false,
 
 			// Cell-level meta (readOnly, className)
-			cells: (row, col) => this.data_manager.get_cell_meta(row, col),
+			cells: (row, col) => {
+				const meta = this.data_manager.get_cell_meta(row, col);
+				// V2.5 AI Analysis: anomaly + cluster row coloring
+				const d = this.data?.[row];
+				if (d) {
+					if (d._is_anomaly) {
+						meta.className = ((meta.className || "") + " ev-anomaly-row").trim();
+					} else if (d._cluster !== undefined && d._cluster !== null) {
+						meta.className = ((meta.className || "") + ` ev-cluster-${d._cluster % 6}`).trim();
+					}
+				}
+				return meta;
+			},
 
 			// Hooks
 			afterChange: (changes, source) => this._on_change(changes, source),
@@ -948,11 +964,34 @@ frappe.views.ExcelBoard = class ExcelBoard {
 		this.columns.forEach(c => { if (c._is_join_loading) delete c._is_join_loading; });
 		this._master_columns.forEach(c => { if (c._is_join_loading) delete c._is_join_loading; });
 
-		// Build name → joined-field values lookup
-		const by_name = Object.fromEntries(joined_rows.map(r => [r.name, r]));
+		// Group joined rows by base record name to detect 1:N fan-out.
+		// e.g. User → Task (1:N): user1 may appear 3 times in joined_rows.
+		const grouped = {};
+		joined_rows.forEach(jr => {
+			(grouped[jr.name] = grouped[jr.name] || []).push(jr);
+		});
 
-		// Merge joined fields into every existing data row
-		this.list_view.data.forEach(doc => Object.assign(doc, by_name[doc.name] || {}));
+		const max_fan = Math.max(1, ...Object.values(grouped).map(v => v.length));
+
+		if (max_fan > 1) {
+			// 1:N join — expand base rows to match every joined occurrence.
+			// Each base doc is cloned once per joined row so no data is dropped.
+			const expanded = [];
+			this.list_view.data.forEach(doc => {
+				const matches = grouped[doc.name];
+				if (matches?.length) {
+					matches.forEach(jr => expanded.push(Object.assign({ ...doc }, jr)));
+				} else {
+					expanded.push(doc); // no join match — keep original row (NULLs)
+				}
+			});
+			this.list_view.data = expanded;
+		} else {
+			// 1:1 join — simple merge by name (existing behaviour)
+			const by_name = {};
+			joined_rows.forEach(jr => { by_name[jr.name] = jr; });
+			this.list_view.data.forEach(doc => Object.assign(doc, by_name[doc.name] || {}));
+		}
 
 		// If the user selected specific base-node fields in the canvas, filter columns.
 		// Always keep: name col, formula cols, existing join cols, hidden-col metadata.
@@ -1205,6 +1244,98 @@ frappe.views.ExcelBoard = class ExcelBoard {
 		this.hot?.render();
 	}
 
+	// ── V2.5 Sheet context switching ──────────────────────────────────────────
+
+	/**
+	 * Rebuild columns + data context for a different doctype sheet.
+	 * Called by SheetManager._apply_sheet() and ._lazy_fetch().
+	 * @param {Object} sheet - SheetState from SheetManager
+	 */
+	_switch_sheet_context(sheet) {
+		if (!sheet) return;
+
+		// Cache current base-sheet join config before switching
+		if (sheet.doctype === this.doctype) {
+			// Switching back to base — restore original columns
+			this.columns = [...this._master_columns];
+		} else if (sheet._columns) {
+			// Already built columns for this sheet — reuse
+			this.columns = sheet._columns;
+		} else {
+			// Build minimal columns from doctype meta (lazy)
+			frappe.model.with_doctype(sheet.doctype, () => {
+				const meta = frappe.get_meta(sheet.doctype);
+				const show_fields = meta.fields
+					.filter((f) => !["Section Break", "Column Break", "HTML", "Table", "Tab Break"].includes(f.fieldtype))
+					.slice(0, 12);
+
+				const cols = [
+					{
+						data: "name",
+						title: "ID",
+						type: "text",
+						width: 160,
+						readOnly: true,
+						_readonly: true,
+					},
+					...show_fields.map((f) => ({
+						data: f.fieldname,
+						title: f.label || f.fieldname,
+						type: "text",
+						width: 140,
+						readOnly: f.read_only ? true : !this.list_view.can_write,
+						_readonly: !!f.read_only,
+					})),
+				];
+
+				sheet._columns = cols;
+				this.columns = cols;
+
+				if (this.hot) {
+					this.hot.updateSettings({ columns: this.columns });
+					if (sheet.data) this.hot.loadData(sheet.data);
+				}
+			});
+
+			// Placeholder columns while meta loads
+			this.columns = [{ data: "name", title: "ID", type: "text", width: 160, readOnly: true }];
+		}
+	}
+
+	/**
+	 * Inject lookup columns into the grid (from IntelliLookup).
+	 * Same pattern as _apply_join_result but for client-side lookup cols.
+	 * @param {Array} lookup_cols - HOT column definitions with _is_lookup_col:true
+	 * @param {Array} data        - base data array (already mutated with lookup values)
+	 */
+	_inject_lookup_columns(lookup_cols, data) {
+		// Remove stale lookup cols of the same types (by data key prefix)
+		const new_keys = new Set(lookup_cols.map((c) => c.data));
+		this.columns = this.columns.filter((c) => !c._is_lookup_col || new_keys.has(c.data));
+		this._master_columns = this._master_columns.filter((c) => !c._is_lookup_col || new_keys.has(c.data));
+
+		// Seed empty values so HOT rows have the key defined
+		(data || []).forEach((row) => {
+			lookup_cols.forEach((col) => {
+				if (!(col.data in row)) row[col.data] = "";
+			});
+		});
+
+		// Append new lookup columns
+		lookup_cols.forEach((col) => {
+			if (!this.columns.find((c) => c.data === col.data)) {
+				this.columns.push(col);
+				this._master_columns.push(col);
+			}
+		});
+
+		// Reload HOT
+		this.matrix = this.data_manager.to_matrix(data, this.columns);
+		this.formula_bridge.reload(this.matrix);
+		this.hot.updateSettings({ columns: this.columns });
+		this.hot.loadData(data);
+	}
+
 	/**
 	 * Destroy HOT instance and unbind all events.
 	 * Called when navigating away from Excel View.
@@ -1219,6 +1350,7 @@ frappe.views.ExcelBoard = class ExcelBoard {
 		this.formula_bar_component?.destroy();
 		this.status_bar?.destroy();
 		this.workbook_manager?.destroy();
+		this.sheet_manager?.destroy();
 		this.hot?.destroy();
 		this.hot = null;
 		this.$wrapper?.empty();
