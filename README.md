@@ -19,12 +19,17 @@ Works on **vanilla Frappe** and optionally unlocks ERPNext-specific formula func
 - **Find & Replace** — Ctrl+F / Ctrl+H with match-case, whole-cell options; draggable panel
 - **Column Freeze** — Freeze any number of leading columns; state persisted per user
 - **Status bar** — Live selection stats (Count, Sum, Average, Min, Max) in a fixed footer
-- **Saved Workbooks** — Save named views with formula columns, column layout, and filters
+- **Saved Workbooks** — Save named views with formula columns, column layout, filters, join config, and sheet tabs
+- **Multi-Sheet Workbooks** — Multiple DocType tabs in one workbook; each tab is an independent query with its own fields, filters, and sort
 - **Export** — Export to `.xlsx` (Excel) or `.csv`
 - **Import** — Import from `.xlsx` or `.csv` with column mapping
 - **Inline save** — Cell edits sync back to Frappe DB in real time
-- **IntelliFlow Join Canvas** — Visual multi-DocType join builder; drag-and-drop nodes, SVG bezier wires, grade badges (S/A/B/C/D/F), cardinality + coverage stats; canvas state persisted per user
-- **AI Join Suggestions** — networkx graph + TF-IDF + RapidFuzz surface related DocTypes automatically; right-side drawer with per-node ✨ targeting and live search
+- **IntelliFlow Join Canvas** — Visual multi-DocType join builder; drag-and-drop nodes, SVG bezier wires, grade badges (S/A/B/C/D/F), cardinality + coverage stats; canvas auto-saved on every structural change
+- **Child Table Support** — Child-table DocTypes (e.g. `Timesheet Detail`, `Sales Invoice Item`) can be added as canvas nodes; teal `CT` badge distinguishes them; system fields (`parent`, `parenttype`, `parentfield`, `idx`) auto-filtered
+- **Aggregate Mode** — CT nodes replace field checkboxes with a `📊 Aggregate` panel: choose field + function (SUM/COUNT/AVG/MIN/MAX) per column; generates a `GROUP BY` subquery so you always get 1 row per parent record (no fan-out)
+- **Per-Node Transform Panel** — Non-CT nodes get a collapsible `🔧 Transform` section: Row Filters (=, !=, >, <, >=, <=, like, in) evaluated server-side, and Computed Columns (Python expressions via `frappe.safe_eval`)
+- **AI Join Suggestions** — networkx graph + TF-IDF + RapidFuzz surface related DocTypes automatically; right-side drawer with per-node ✨ targeting, live search, and teal CT stripe for child-table suggestions
+- **AI Analysis Panel** — post-Apply `🤖 Analyze` button opens right-side drawer: Anomaly Detection (IsolationForest) and Clustering (MiniBatchKMeans with silhouette auto-k); results injected as `_anomaly_score`/`_cluster` columns with row highlighting
 - **Join Path Finder** — BFS shortest path through schema graph; auto-builds multi-hop node chains in one click
 - **4-Layer Validation Engine** — Meta Guard → Pattern Matcher → Type Gate (hard incompatibility → instant red wire) → Value Overlap → Semantic (RapidFuzz); works entirely without LLMs
 - **Association Rule Mining** — mlxtend Apriori on joined data surfaces co-occurrence patterns (IF customer=X THEN territory=Y, lift ≥ 1.2)
@@ -56,7 +61,61 @@ bench build --app excel_view   # required after every pull (dist files are not c
 
 ## Release Notes
 
-### v2.4.5 — Current (Feb 2026)
+### v2.5+ — Current (Feb 2026)
+
+**Child Table Support + Aggregate Mode in IntelliFlow Canvas**
+
+- **Child table nodes** — DocTypes with `istable=1` (e.g. `Timesheet Detail`, `Sales Invoice Item`, `Purchase Order Item`) can now be added to the canvas. AI Suggestions automatically surfaces them with a teal `CT` badge and stripe.
+- **Aggregate panel** — CT nodes show a `📊 Aggregate` builder instead of field checkboxes. Add any number of `[field] [SUM/COUNT/AVG/MIN/MAX]` rows. The SQL engine generates a `GROUP BY` subquery — no fan-out, always 1 row per parent record.
+  ```sql
+  -- Example: Task → Timesheet Detail (SUM hours)
+  LEFT JOIN (
+      SELECT task, SUM(hours) AS `Timesheet Detail__hours`
+      FROM `tabTimesheet Detail`
+      GROUP BY task
+  ) t1 ON t0.name = t1.task
+  ```
+- **Schema graph updated** — `_get_all_link_edges()` no longer filters out `istable=1` sources; adds `is_child_src` flag; `suggest_joins()` uses `method: "child_table"` for these; sort order: meta → child_table → ML. Cache key bumped to `v2`.
+- **1:N fan-out fix** — `_apply_join_result()` in `excel_board.js` now detects when `joined_rows` has multiple entries per base record (1:N regular join) and expands `list_view.data` by cloning base rows — preserving all data instead of overwriting with the last row.
+- **Canvas auto-save layout** — Canvas state now persists on every structural change (valid edge created, node removed, node dragged), not only after Apply. Removing all non-base nodes explicitly clears `user_settings` so refresh starts clean.
+
+---
+
+### v2.5 — Feb 2026
+
+**Multi-Sheet Workbooks + Transform Panel + AI Analysis**
+
+**Sheet Tabs**
+- Tab strip at bottom of grid (Excel / Google Sheets style)
+- Each tab = independent DocType query with its own field picker, filters, sort, and column widths
+- `+` button → DocType picker dialog; double-click to rename; `×` to remove (Sheet 1 locked)
+- HyperFormula multi-sheet registration (`hf.addSheet` per tab); active sheet tracked via `formula_bridge.set_active_sheet()`
+- HOT swap on tab switch: `hot.updateSettings({ columns })` + `hot.loadData(data)` — instant, no re-fetch if data cached
+- Lazy fetch — only the active tab loads data on open
+- Workbook save/load includes full `sheets[]` state (`Excel Workbook.sheets` Code/JSON field)
+
+**IntelliLookup Banner**
+- After adding a second sheet tab, a non-intrusive banner auto-detects if the new DocType links to the current one (meta L1A/L1B + value sampling L2)
+- "Add lookup column →" injects a client-side join column without any formula
+
+**Per-Node Transform Panel (`🔧 Transform`)**
+- Collapsible panel on every non-CT, non-base canvas node
+- **Row Filters**: `[field] [=|!=|>|<|>=|<=|like|in] [value]` evaluated server-side in `_apply_node_transforms()`; `like` and `in` operators handled specially; numeric and string comparisons auto-detected
+- **Computed Columns**: `label` + Python expression evaluated via `frappe.safe_eval` with `row` context; safe builtins only; errors → `#ERR!`
+- State serialized into `join_config.nodes[].row_filter` and `computed_cols`; restored from workbook/user_settings
+
+**AI Analysis Panel (`🤖 Analyze`)**
+- Button appears in canvas header after Apply
+- Right-side drawer with two tabs:
+  - **Anomaly Detection** — scikit-learn `IsolationForest`; contamination slider (5–30%); injects `_anomaly_score` + `_is_anomaly` per row; anomalous rows highlighted red in grid
+  - **Clustering** — `MiniBatchKMeans`; K=Auto (silhouette) or manual 2–6; injects `_cluster` column; rows colored by cluster (6 pastel colors); centroid summary dialog
+- Results injected into `board.list_view.data` in-place; `board.hot.render()` picks up row coloring via extended `cells` callback
+
+**New API endpoints**: `detect_lookup`, `detect_anomalies`, `cluster_data`, `_apply_node_transforms`
+
+---
+
+### v2.4.5 — Feb 2026
 
 **IntelliFlow AI — 4-Layer Validation + AI Discovery**
 
@@ -75,7 +134,7 @@ bench build --app excel_view   # required after every pull (dist files are not c
 - **`📊 Patterns`** — mlxtend Apriori on applied join data; IF/THEN table with support, confidence, lift (lift ≥ 2 highlighted green)
 - **Port glow during wire drag** — `rank_field_matches` (TF-IDF + rapidfuzz) scores target ports; high-score ports pulse green, mid-score amber
 - **Badge enrichment** — grade chip + `1:N | 87% cov` appended to each edge label
-- **Performance** — single SQL JOIN on `tabDocField` + `UNION` Custom Fields + 5-min Redis cache replaces N×`get_meta()` calls; `istable=0 + issingle=0` filters exclude child/single DocTypes
+- **Performance** — single SQL JOIN on `tabDocField` + `UNION` Custom Fields + 5-min Redis cache replaces N×`get_meta()` calls
 
 ---
 
@@ -110,17 +169,12 @@ bench build --app excel_view   # required after every pull (dist files are not c
 - Dynamic field validation — respects custom fields from any installed app
 - ERPNext functions conditionally registered — gracefully absent on vanilla Frappe
 
-**Bug fixes**
-- Field picker — selecting new columns now triggers a fresh server fetch; data no longer shows blank for newly added columns
-- "Unsaved changes" indicator no longer appears falsely after dragging a formula column (only fires when a DB-backed field is actually modified)
-
 ---
 
 ### v2.2 — Feb 2026
 
 **Column Freeze**
-- Right-click any column header → "Freeze up to this column"
-- Unfreeze via right-click → "Unfreeze All Columns"
+- Right-click any column header → "Freeze up to this column" / "Unfreeze All Columns"
 - Visual indicator: soft shadow border on freeze boundary
 - Freeze position saved in `user_settings` — restored automatically on next load
 
@@ -190,20 +244,12 @@ bench build --app excel_view   # required after every pull (dist files are not c
 
 ## Upcoming
 
-### v2.5 — Multi-Sheet Workbooks + QUERY()
-
-- Sheet tab bar at bottom (Excel / Google Sheets style)
-- Each tab = independent DocType query with its own field picker, filters, and sort
-- HyperFormula multi-sheet registration (cross-sheet refs prep for V3.0)
-- `=QUERY(doctype, fields, filters)` — pull any DocType data into a sheet; results spill into a dedicated tab
-- Workbook save/load includes all sheet state (lazy fetch — only active tab loads on open)
-- IntelliLookup column auto-detected between related sheets (3-layer: meta Link → sampling → manual builder)
-
 ### v3.0+
 
-- Cross-sheet formulas, charts, pivot tables, conditional formatting, dashboard mode
+- Cross-sheet formulas (`=Sheet2!A1` syntax), charts, pivot tables, conditional formatting, dashboard mode
+- `=QUERY(doctype, fields, filters)` — range-spilling formula that pulls any DocType data into a sheet
 - Smart Autofill — RandomForest predicts values per field per DocType
-- Stock Reorder Predictor — days-to-reorder + suggested qty column (LinearReg + IsolationForest)
+- Stock Reorder Predictor — days-to-reorder + suggested qty column (LinearReg + IsolationForest on Bin/SLE data)
 - Impact Simulator — bi-directional change tracing across linked documents
 
 ---

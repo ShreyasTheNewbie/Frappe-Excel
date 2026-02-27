@@ -423,6 +423,7 @@ def save_workbook(
 	is_public: int = 0,
 	workbook_name: str | None = None,
 	join_config: str | None = None,
+	sheets: str | None = None,
 ) -> dict:
 	"""
 	Create a new workbook or update an existing one.
@@ -459,6 +460,7 @@ def save_workbook(
 	doc.filters        = filters
 	doc.sort_by        = sort_by or "{}"
 	doc.join_config    = join_config or "{}"
+	doc.sheets         = sheets or "[]"
 
 	doc.save(ignore_permissions=False)
 
@@ -601,50 +603,57 @@ def _cardinality_and_coverage(src_list: list, tgt_list: list):
 #   Before: suggest_joins ≈ 300 get_meta() calls  ≈ 300 DB queries
 #   After : 1-2 SQL JOIN queries → edge list       → cached, no repeat
 
-_GRAPH_CACHE_KEY = "ev_link_graph_edges_v1"
+_GRAPH_CACHE_KEY = "ev_link_graph_edges_v2"  # bump when SQL schema changes
 _GRAPH_CACHE_TTL = 300  # seconds
 
 
 def _get_all_link_edges() -> list:
 	"""
-	Return every Link-field edge across all regular (non-child, non-single)
-	DocTypes in a SINGLE SQL query. Both sides of the edge must be regular
-	DocTypes — child tables and singles are excluded by the JOIN filter.
+	Return every Link-field edge across all non-single DocTypes in a SINGLE SQL
+	query. Child tables (istable=1) are now included as edge SOURCES so that
+	canvas users can join child-table DocTypes (e.g. "Timesheet Detail") that
+	carry a Link field to the base DocType. The JOIN target is still restricted
+	to non-child, non-single DocTypes.
 
 	Custom fields (tabCustom Field) are merged via UNION ALL.
 	Result is cached in Redis for 5 min; subsequent calls are instant.
 
-	Each entry: {"doctype": str, "fieldname": str, "label": str, "target": str}
+	Each entry: {
+	  "doctype": str, "fieldname": str, "label": str, "target": str,
+	  "is_child_src": int   # 1 when the source DocType is a child table
+	}
 	"""
 	cached = frappe.cache().get_value(_GRAPH_CACHE_KEY)
 	if cached is not None:
 		return cached
 
 	sql = """
-		SELECT df.parent   AS doctype,
+		SELECT df.parent      AS doctype,
 		       df.fieldname,
 		       COALESCE(NULLIF(df.label, ''), df.fieldname) AS label,
-		       df.options  AS target
+		       df.options     AS target,
+		       src.istable    AS is_child_src
 		FROM   `tabDocField` df
 		JOIN   `tabDocType`  src ON src.name = df.parent
 		JOIN   `tabDocType`  tgt ON tgt.name = df.options
 		WHERE  df.fieldtype = 'Link'
 		  AND  df.options IS NOT NULL AND df.options != ''
-		  AND  src.issingle = 0 AND src.istable = 0
+		  AND  src.issingle = 0
 		  AND  tgt.issingle = 0 AND tgt.istable = 0
 
 		UNION ALL
 
-		SELECT cf.dt        AS doctype,
+		SELECT cf.dt          AS doctype,
 		       cf.fieldname,
 		       COALESCE(NULLIF(cf.label, ''), cf.fieldname) AS label,
-		       cf.options   AS target
+		       cf.options     AS target,
+		       src.istable    AS is_child_src
 		FROM   `tabCustom Field` cf
 		JOIN   `tabDocType`  src ON src.name = cf.dt
 		JOIN   `tabDocType`  tgt ON tgt.name = cf.options
 		WHERE  cf.fieldtype = 'Link'
 		  AND  cf.options IS NOT NULL AND cf.options != ''
-		  AND  src.issingle = 0 AND src.istable = 0
+		  AND  src.issingle = 0
 		  AND  tgt.issingle = 0 AND tgt.istable = 0
 	"""
 	edges = [dict(row) for row in frappe.db.sql(sql, as_dict=True)]
@@ -844,15 +853,18 @@ def suggest_joins(base_doctype: str, force_refresh: bool = False) -> list:
 
 	for e in edges:
 		dt, tgt = e["doctype"], e["target"]
+		is_ct   = bool(e.get("is_child_src"))
 
 		if tgt == base_doctype and dt != base_doctype:
 			# dt.field → base_doctype  (base is the JOIN target)
+			# For child tables: join ON base.name = child.{link_field}
 			if dt not in candidates:
 				try:
 					if frappe.has_permission(dt, "read"):
 						candidates[dt] = dict(
 							doctype=dt, src_field="name", tgt_field=e["fieldname"],
-							score=1.0, method="meta",
+							score=1.0,
+							method="child_table" if is_ct else "meta",
 							reason=f"{dt}.{e['label']} → {base_doctype}",
 						)
 				except Exception:
@@ -944,8 +956,12 @@ def suggest_joins(base_doctype: str, force_refresh: bool = False) -> list:
 		except Exception:
 			continue
 
-	# meta links (score=1.0) sorted alphabetically, then ML candidates by score desc
-	return sorted(candidates.values(), key=lambda x: (-x["score"], x["doctype"]))
+	# Sort: regular meta first (alphabetical), then child_table (alphabetical), then ML (score desc)
+	METHOD_ORDER = {"meta": 0, "child_table": 1, "ml": 2}
+	return sorted(
+		candidates.values(),
+		key=lambda x: (METHOD_ORDER.get(x["method"], 9), -x["score"], x["doctype"]),
+	)
 
 
 @frappe.whitelist()
@@ -1176,18 +1192,51 @@ def get_joined_data(base_doctype: str, join_config: str, limit: int = 1000) -> l
 		src_alias = node_alias.get(edge.get("src_node_id", ""), "t0")
 		node_alias[edge["tgt_node_id"]] = alias
 
-		# Backtick-quote field identifiers (NOT frappe.db.escape which adds string quotes)
-		for field in edge.get("selected_fields", []):
-			safe_field = _safe_identifier(field)
-			col_alias  = f"{tgt_dt}__{safe_field}"   # e.g. "Employee__date_of_birth"
-			select_parts.append(f"`{alias}`.`{safe_field}` AS `{col_alias}`")
-
 		src_f = _safe_identifier(edge.get("src_field", "name"))
 		tgt_f = _safe_identifier(edge.get("tgt_field", "name"))
-		joins_sql += (
-			f"\nLEFT JOIN `tab{tgt_dt}` `{alias}`"
-			f" ON `{src_alias}`.`{src_f}` = `{alias}`.`{tgt_f}`"
-		)
+
+		agg_cols = tgt_node.get("aggregate_cols")  # [{field, func}] for CT nodes
+
+		if agg_cols:
+			# ── Aggregate subquery: collapses CT fan-out → 1 row per parent key ──
+			# e.g. LEFT JOIN (
+			#   SELECT task, SUM(hours) AS `Timesheet Detail__hours`
+			#   FROM `tabTimesheet Detail` GROUP BY task
+			# ) t1 ON t0.name = t1.task
+			VALID_FUNCS = frozenset({"SUM", "COUNT", "AVG", "MIN", "MAX"})
+			sub_selects = [f"`{tgt_f}`"]  # group-by key always first
+			for col in agg_cols:
+				safe_f = _safe_identifier(col.get("field", ""))
+				if not safe_f:
+					continue
+				func = str(col.get("func", "SUM")).upper()
+				if func not in VALID_FUNCS:
+					func = "SUM"
+				col_alias = f"{tgt_dt}__{safe_f}"
+				sub_selects.append(f"{func}(`{safe_f}`) AS `{col_alias}`")
+				select_parts.append(f"`{alias}`.`{col_alias}`")
+
+			subquery = (
+				f"(SELECT {', '.join(sub_selects)}"
+				f" FROM `tab{tgt_dt}`"
+				f" GROUP BY `{tgt_f}`)"
+			)
+			joins_sql += (
+				f"\nLEFT JOIN {subquery} `{alias}`"
+				f" ON `{src_alias}`.`{src_f}` = `{alias}`.`{tgt_f}`"
+			)
+		else:
+			# ── Flat JOIN (regular non-CT nodes) ──────────────────────────────
+			# Backtick-quote field identifiers (NOT frappe.db.escape — wrong quote type)
+			for field in edge.get("selected_fields", []):
+				safe_field = _safe_identifier(field)
+				col_alias  = f"{tgt_dt}__{safe_field}"   # e.g. "Employee__date_of_birth"
+				select_parts.append(f"`{alias}`.`{safe_field}` AS `{col_alias}`")
+
+			joins_sql += (
+				f"\nLEFT JOIN `tab{tgt_dt}` `{alias}`"
+				f" ON `{src_alias}`.`{src_f}` = `{alias}`.`{tgt_f}`"
+			)
 
 	# ── Optional WHERE filter: restrict to the names already loaded in the grid ──
 	# This ensures Apply returns exactly the rows the user sees, regardless of limit.
@@ -1206,4 +1255,322 @@ def get_joined_data(base_doctype: str, join_config: str, limit: int = 1000) -> l
 		f"{where_sql}"
 		f"\nLIMIT {frappe.utils.cint(limit)}"
 	)
-	return frappe.db.sql(sql, values=where_vals or None, as_dict=True)
+	rows = frappe.db.sql(sql, values=where_vals or None, as_dict=True)
+
+	# ── V2.5: per-node Transform (row filters + computed columns) ─────────────
+	node_list = list(nodes.values()) if nodes else []
+	if node_list:
+		rows = _apply_node_transforms(rows, node_list)
+
+	return rows
+
+
+def _apply_node_transforms(rows: list, nodes: list) -> list:
+	"""
+	Post-process join result with per-node row filters and computed columns.
+
+	Each node may carry:
+	  row_filter:    [{field, op, value}]  — keep rows matching ALL conditions
+	  computed_cols: [{key, label, expr}]  — evaluate Python expr via frappe.safe_eval
+	                                          with `row` context variable
+
+	Field names in row_filter are matched with or without the DocType__ prefix.
+	"""
+	import operator as op_module
+
+	OPS = {
+		"=":  "eq", "!=": "ne",
+		">":  "gt", "<":  "lt",
+		">=": "ge", "<=": "le",
+	}
+	SAFE_ENV = {
+		"__builtins__": {},
+		"round": round, "len": len, "str": str,
+		"int": int, "float": float, "abs": abs,
+		"min": min, "max": max, "bool": bool,
+	}
+
+	for node in nodes:
+		doctype = node.get("doctype", "")
+		prefix  = f"{doctype}__"
+
+		# ── Row filter ────────────────────────────────────────────────────────
+		for f in node.get("row_filter", []):
+			raw_field = f.get("field", "")
+			op_key    = f.get("op", "=")
+			val       = f.get("value", "")
+
+			# Resolve fieldname with or without prefix
+			field = (
+				raw_field if raw_field.startswith(prefix)
+				else f"{prefix}{raw_field}"
+			)
+
+			if op_key == "like":
+				needle = str(val).replace("%", "").lower()
+				rows = [r for r in rows if needle in str(r.get(field, "") or "").lower()]
+
+			elif op_key == "in":
+				allowed = {v.strip() for v in str(val).split(",")}
+				rows = [r for r in rows if str(r.get(field, "") or "") in allowed]
+
+			else:
+				op_fn = getattr(op_module, OPS.get(op_key, "eq"))
+				kept  = []
+				for r in rows:
+					cell = r.get(field, "") or ""
+					try:
+						kept.append(op_fn(float(cell), float(val)))
+						if kept[-1]:
+							pass
+						else:
+							kept.pop()
+							continue
+					except (ValueError, TypeError):
+						kept.append(op_fn(str(cell), str(val)))
+					if kept[-1]:
+						pass
+					else:
+						kept.pop()
+				# Rebuild rows from kept booleans — we need the actual row objects
+				# Re-approach: filter in one pass
+				new_rows = []
+				for r in rows:
+					cell = r.get(field, "") or ""
+					try:
+						if op_fn(float(cell), float(val)):
+							new_rows.append(r)
+					except (ValueError, TypeError):
+						if op_fn(str(cell), str(val)):
+							new_rows.append(r)
+				rows = new_rows
+
+		# ── Computed columns ──────────────────────────────────────────────────
+		for col in node.get("computed_cols", []):
+			key  = col.get("key", "")
+			expr = col.get("expr", "")
+			if not key or not expr:
+				continue
+			for r in rows:
+				# Expose both prefixed and un-prefixed keys as context variables
+				row_ctx: dict = {}
+				for k, v in r.items():
+					row_ctx[k] = v
+					if k.startswith(prefix):
+						row_ctx[k[len(prefix):]] = v
+				try:
+					r[key] = frappe.safe_eval(expr, SAFE_ENV, {"row": row_ctx, **row_ctx})
+				except Exception:
+					r[key] = "#ERR!"
+
+	return rows
+
+
+# ── V2.5 — IntelliLookup: detect_lookup ───────────────────────────────────────
+
+@frappe.whitelist()
+def detect_lookup(src_doctype: str, tgt_doctype: str) -> list:
+	"""
+	3-Layer IntelliLookup detection for Sheet Tabs (V2.5).
+
+	Layer 1 — Direct Link field (meta, instant):
+	  src_doctype has a Link→tgt_doctype field → confidence 1.0
+	  tgt_doctype has a Link→src_doctype field → confidence 0.9 (reverse)
+
+	Layer 2 — Value sampling (if Layer 1 empty):
+	  Sample up to 15 unique values from candidate Data/Link fields on src.
+	  For each, check frappe.db.exists(tgt_doctype, val).
+	  If ≥70% match → valid candidate, confidence = match_ratio.
+
+	Returns [{src_field, tgt_field, label, layer, confidence}] sorted by confidence desc.
+	Returns [] if no link candidate found with confidence ≥ 0.3.
+	"""
+	frappe.has_permission(src_doctype, "read", throw=True)
+	frappe.has_permission(tgt_doctype, "read", throw=True)
+
+	results = []
+
+	# ── Layer 1A: src has Link→tgt ────────────────────────────────────────────
+	for df in frappe.get_meta(src_doctype).fields:
+		if df.fieldtype == "Link" and df.options == tgt_doctype:
+			results.append({
+				"src_field":  df.fieldname,
+				"tgt_field":  "name",
+				"label":      df.label or df.fieldname,
+				"layer":      1,
+				"confidence": 1.0,
+			})
+
+	if results:
+		return results
+
+	# ── Layer 1B: tgt has Link→src (reverse) ─────────────────────────────────
+	for df in frappe.get_meta(tgt_doctype).fields:
+		if df.fieldtype == "Link" and df.options == src_doctype:
+			results.append({
+				"src_field":  "name",
+				"tgt_field":  df.fieldname,
+				"label":      df.label or df.fieldname,
+				"layer":      1,
+				"confidence": 0.9,
+			})
+
+	if results:
+		return results
+
+	# ── Layer 2: value-sampling on Data / Link fields ─────────────────────────
+	SAMPLE_LIMIT = 15
+	SKIP_FT = {
+		"Section Break", "Column Break", "Tab Break", "Fold", "Heading",
+		"HTML", "Custom HTML", "Table", "Table MultiSelect", "Password",
+		"Text", "Long Text", "Code", "Attach", "Attach Image",
+		"Date", "Datetime", "Time", "Check", "Int", "Float", "Currency",
+		"Percent", "Rating", "Duration",
+	}
+
+	for df in frappe.get_meta(src_doctype).fields:
+		if df.fieldtype in SKIP_FT or df.is_virtual:
+			continue
+
+		raw = frappe.get_all(src_doctype, pluck=df.fieldname, limit=SAMPLE_LIMIT)
+		values = list({str(v) for v in raw if v})[:SAMPLE_LIMIT]
+		if not values:
+			continue
+
+		hits = sum(
+			1 for v in values
+			if frappe.db.exists(tgt_doctype, v)
+		)
+		ratio = hits / len(values)
+		if ratio >= 0.3:
+			results.append({
+				"src_field":  df.fieldname,
+				"tgt_field":  "name",
+				"label":      df.label or df.fieldname,
+				"layer":      2,
+				"confidence": round(ratio, 2),
+			})
+
+	return sorted(results, key=lambda x: -x["confidence"])
+
+
+# ── V2.5 — Canvas AI Analysis: detect_anomalies + cluster_data ────────────────
+
+@frappe.whitelist()
+def detect_anomalies(
+	rows: str,
+	numeric_fields: str,
+	contamination: float = 0.1,
+) -> list:
+	"""
+	Run Isolation Forest anomaly detection on the joined result rows.
+
+	Args:
+	    rows:            JSON-encoded list of flat row dicts (from get_joined_data).
+	    numeric_fields:  JSON-encoded list of fieldnames to use as features.
+	    contamination:   Expected fraction of outliers (0.05 – 0.30).
+
+	Returns the same rows list with two new keys per row:
+	    _anomaly_score: float (higher = more normal; negative = anomalous)
+	    _is_anomaly:    bool
+
+	Minimum 5 rows required — returns unchanged rows if fewer.
+	"""
+	from sklearn.ensemble import IsolationForest
+	import numpy as np, json
+
+	rows_data = json.loads(rows)
+	fields    = json.loads(numeric_fields)
+
+	if len(rows_data) < 5 or not fields:
+		for r in rows_data:
+			r["_anomaly_score"] = 0.0
+			r["_is_anomaly"]    = False
+		return rows_data
+
+	contamination = max(0.01, min(0.5, float(contamination)))
+
+	X = np.array([
+		[float(r.get(f, 0) or 0) for f in fields]
+		for r in rows_data
+	])
+
+	clf    = IsolationForest(contamination=contamination, random_state=42)
+	clf.fit(X)
+	scores = clf.decision_function(X)  # more negative = more anomalous
+	labels = clf.predict(X)            # -1 = anomaly, +1 = normal
+
+	for i, r in enumerate(rows_data):
+		r["_anomaly_score"] = round(float(scores[i]), 4)
+		r["_is_anomaly"]    = bool(labels[i] == -1)
+
+	return rows_data
+
+
+@frappe.whitelist()
+def cluster_data(
+	rows: str,
+	numeric_fields: str,
+	n_clusters: int = 0,
+) -> dict:
+	"""
+	K-Means clustering on the joined result rows.
+
+	Args:
+	    rows:           JSON-encoded list of flat row dicts.
+	    numeric_fields: JSON-encoded list of fieldnames to use as features.
+	    n_clusters:     Number of clusters (0 = auto-select via silhouette score).
+
+	Returns:
+	    {
+	      "rows":       same rows with "_cluster" (int, 0-based) added,
+	      "n_clusters": int — number of clusters used,
+	      "summary":    [{cluster, <field>: centroid_value, ...}]
+	    }
+
+	Minimum 6 rows required; n_clusters auto-selects between k=2..6.
+	"""
+	from sklearn.cluster import MiniBatchKMeans
+	from sklearn.preprocessing import StandardScaler
+	from sklearn.metrics import silhouette_score
+	import numpy as np, json
+
+	rows_data = json.loads(rows)
+	fields    = json.loads(numeric_fields)
+	k         = frappe.utils.cint(n_clusters)
+
+	if len(rows_data) < 6 or not fields:
+		for r in rows_data:
+			r["_cluster"] = 0
+		return {"rows": rows_data, "n_clusters": 1, "summary": []}
+
+	X     = np.array([[float(r.get(f, 0) or 0) for f in fields] for r in rows_data])
+	scaler = StandardScaler()
+	X_s   = scaler.fit_transform(X)
+
+	# Auto-select k via silhouette score when k=0
+	if k <= 0:
+		best_k, best_sc = 2, -1.0
+		for ck in range(2, min(7, len(rows_data))):
+			labels_trial = MiniBatchKMeans(ck, random_state=42).fit_predict(X_s)
+			try:
+				sc = silhouette_score(X_s, labels_trial)
+			except Exception:
+				sc = -1.0
+			if sc > best_sc:
+				best_k, best_sc = ck, sc
+		k = best_k
+
+	km = MiniBatchKMeans(k, random_state=42).fit(X_s)
+
+	for i, r in enumerate(rows_data):
+		r["_cluster"] = int(km.labels_[i])
+
+	# Cluster centroids in original (un-scaled) units
+	centroids_unscaled = scaler.inverse_transform(km.cluster_centers_)
+	summary = [
+		{"cluster": ci, **{f: round(float(v), 4) for f, v in zip(fields, row)}}
+		for ci, row in enumerate(centroids_unscaled)
+	]
+
+	return {"rows": rows_data, "n_clusters": k, "summary": summary}
