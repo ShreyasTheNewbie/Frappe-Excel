@@ -27,10 +27,10 @@ app_license = "mit"
 # include js, css files in header of desk.html
 # Router bundle (~2KB) — loads on every Frappe page to register the view
 # and monkey-patch routing. Zero cost for non-Excel-View users.
-app_include_js = ["excel_view_router.bundle.js"]
+app_include_js = ["excel_view_router.bundle.js", "collaboration_sidebar.bundle.js", "collaboration_dialog.bundle.js"]
 
 # CSS — always include (tiny, needed for ev-page-active z-index fix etc.)
-app_include_css = ["excel_view.bundle.css"]
+app_include_css = ["excel_view.bundle.css", "collaboration_dialog.bundle.css"]
 
 # The full deps bundle (excel_view.bundle.js, ~1.4MB with HOT + HF + deps)
 # is NOT listed here. It is loaded dynamically by excel_view_router.bundle.js
@@ -254,4 +254,10 @@ app_include_css = ["excel_view.bundle.css"]
 # ------------
 # List of apps whose translatable strings should be excluded from this app's translations.
 # ignore_translatable_strings_from = []
+
+# Socket.IO
+# ---------
+# NOTE: socketio_port is managed by Frappe/Frappe Cloud automatically.
+# Do not override unless running in local development with custom setup.
+# For Frappe Cloud deployment, this is handled by the platform.
 
