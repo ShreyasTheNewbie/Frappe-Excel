@@ -16,6 +16,10 @@ dependencies = [
     "numpy>=1.24",
     "pandas>=2.0",
     "RapidFuzz>=3.0",
+    "spacy>=3.7",
+    # Note: spaCy model (en_core_web_sm) is specified in requirements.txt as direct URL
+    # This auto-installs during bench build/deployment without manual download
+    "sentence-transformers>=2.2",
 ]
 
 [build-system]

@@ -1,0 +1,138 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "field:session_id",
+ "creation": "2026-02-28 13:04:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "session_id",
+  "title",
+  "base_doctype",
+  "column_break_1",
+  "owner",
+  "created_at",
+  "last_activity",
+  "section_break_2",
+  "canvas_state",
+  "chat_messages",
+  "section_break_3",
+  "is_public",
+  "collaborators"
+ ],
+ "fields": [
+  {
+   "fieldname": "session_id",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Session ID",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "title",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Title",
+   "reqd": 1
+  },
+  {
+   "fieldname": "base_doctype",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "Base DocType",
+   "options": "DocType",
+   "reqd": 1
+  },
+  {
+   "fieldname": "column_break_1",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Today",
+   "fieldname": "created_at",
+   "fieldtype": "Datetime",
+   "label": "Created At",
+   "read_only": 1
+  },
+  {
+   "default": "Now",
+   "fieldname": "last_activity",
+   "fieldtype": "Datetime",
+   "label": "Last Activity",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_break_2",
+   "fieldtype": "Section Break",
+   "label": "Canvas Configuration"
+  },
+  {
+   "fieldname": "canvas_state",
+   "fieldtype": "Code",
+   "label": "Canvas State",
+   "options": "JSON"
+  },
+  {
+   "fieldname": "chat_messages",
+   "fieldtype": "Code",
+   "label": "Chat Messages",
+   "options": "JSON"
+  },
+  {
+   "fieldname": "section_break_3",
+   "fieldtype": "Section Break",
+   "label": "Sharing"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_public",
+   "fieldtype": "Check",
+   "label": "Is Public"
+  },
+  {
+   "fieldname": "collaborators",
+   "fieldtype": "Table",
+   "label": "Collaborators",
+   "options": "Canvas Session Collaborator"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "links": [],
+ "modified": "2026-02-28 13:04:00.000000",
+ "modified_by": "Administrator",
+ "module": "Excel View",
+ "name": "Canvas Session",
+ "naming_rule": "By fieldname",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "All",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}

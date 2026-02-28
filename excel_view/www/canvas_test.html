@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Canvas Collaboration Test</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+            font-weight: bold;
+        }
+        .status.connected {
+            background: #d4edda;
+            color: #155724;
+        }
+        .status.disconnected {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .controls {
+            margin: 20px 0;
+        }
+        input, button {
+            padding: 10px;
+            margin: 5px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        #log {
+            background: #f8f9fa;
+            border: 1px solid #ddd;
+            padding: 15px;
+            margin-top: 20px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+        }
+        .log-entry {
+            padding: 5px;
+            margin: 2px 0;
+            border-left: 3px solid #007bff;
+            padding-left: 10px;
+        }
+        .log-error {
+            border-left-color: #dc3545;
+            color: #dc3545;
+        }
+        .log-success {
+            border-left-color: #28a745;
+            color: #28a745;
+        }
+        .online-users {
+            background: #e7f3ff;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+        }
+        .user-badge {
+            display: inline-block;
+            background: #007bff;
+            color: white;
+            padding: 5px 10px;
+            border-radius: 15px;
+            margin: 3px;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 Canvas Collaboration Test</h1>
+
+        <div id="status" class="status disconnected">
+            Status: Disconnected
+        </div>
+
+        <div class="controls">
+            <input type="text" id="sessionId" placeholder="Session ID (e.g., test123)" value="test123">
+            <button onclick="joinSession()">Join Session</button>
+            <button onclick="leaveSession()">Leave Session</button>
+        </div>
+
+        <div class="controls">
+            <input type="text" id="chatMessage" placeholder="Type a message...">
+            <button onclick="sendMessage()">Send Message</button>
+        </div>
+
+        <div class="online-users">
+            <strong>Online Users:</strong>
+            <div id="onlineUsers"></div>
+        </div>
+
+        <div id="log"></div>
+    </div>
+
+    <script src="/assets/frappe/node_modules/socket.io-client/dist/socket.io.min.js"></script>
+    <script>
+        let socket = null;
+        let currentSession = null;
+
+        function log(message, type = 'info') {
+            const logDiv = document.getElementById('log');
+            const entry = document.createElement('div');
+            entry.className = `log-entry log-${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        function updateStatus(connected) {
+            const statusDiv = document.getElementById('status');
+            statusDiv.className = `status ${connected ? 'connected' : 'disconnected'}`;
+            statusDiv.textContent = `Status: ${connected ? 'Connected ✓' : 'Disconnected ✗'}`;
+        }
+
+        function updateOnlineUsers(users) {
+            const usersDiv = document.getElementById('onlineUsers');
+            usersDiv.innerHTML = users.map(u =>
+                `<span class="user-badge">${u.full_name || u.user}</span>`
+            ).join('');
+        }
+
+        // Initialize Socket.IO connection
+        function initSocket() {
+            if (socket) {
+                return;
+            }
+
+            const sitename = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+                ? 'index.com'
+                : window.location.hostname;
+
+            // Socket.IO runs on port 9000 in development
+            const socketPort = 9000;
+            const socketHost = `${window.location.protocol}//${window.location.hostname}:${socketPort}`;
+
+            log(`Connecting to Socket.IO server at ${socketHost}/${sitename}...`);
+
+            socket = io(`${socketHost}/${sitename}`, {
+                withCredentials: true,
+                transports: ['websocket', 'polling']
+            });
+
+            socket.on('connect', () => {
+                log('Socket.IO connected!', 'success');
+                updateStatus(true);
+            });
+
+            socket.on('disconnect', () => {
+                log('Socket.IO disconnected', 'error');
+                updateStatus(false);
+            });
+
+            socket.on('connect_error', (error) => {
+                log(`Connection error: ${error.message}`, 'error');
+                updateStatus(false);
+            });
+
+            // Canvas collaboration events
+            socket.on('canvas_joined', (data) => {
+                log(`✓ Joined session: ${data.session_id}`, 'success');
+                log(`Online users: ${data.online_users.length}`, 'info');
+                updateOnlineUsers(data.online_users);
+            });
+
+            socket.on('user_joined', (data) => {
+                log(`👤 ${data.full_name} joined`, 'success');
+            });
+
+            socket.on('user_left', (data) => {
+                log(`👋 ${data.user} left`, 'info');
+            });
+
+            socket.on('chat_message_received', (data) => {
+                log(`💬 ${data.full_name}: ${data.message}`, 'info');
+            });
+
+            socket.on('canvas_updated', (data) => {
+                log(`🔄 Canvas updated by ${data.user}`, 'info');
+            });
+
+            socket.on('error', (data) => {
+                log(`❌ Error: ${data.message}`, 'error');
+            });
+        }
+
+        function joinSession() {
+            const sessionId = document.getElementById('sessionId').value;
+            if (!sessionId) {
+                alert('Please enter a session ID');
+                return;
+            }
+
+            if (!socket || !socket.connected) {
+                initSocket();
+                // Wait for connection
+                setTimeout(() => {
+                    if (socket && socket.connected) {
+                        performJoin(sessionId);
+                    } else {
+                        log('Not connected to Socket.IO server', 'error');
+                    }
+                }, 1000);
+            } else {
+                performJoin(sessionId);
+            }
+        }
+
+        function performJoin(sessionId) {
+            currentSession = sessionId;
+            log(`Joining session: ${sessionId}...`);
+            socket.emit('join_canvas', { session_id: sessionId });
+        }
+
+        function leaveSession() {
+            if (socket) {
+                socket.disconnect();
+                socket = null;
+                currentSession = null;
+                log('Disconnected from session');
+                updateStatus(false);
+                updateOnlineUsers([]);
+            }
+        }
+
+        function sendMessage() {
+            const message = document.getElementById('chatMessage').value;
+            if (!message) {
+                return;
+            }
+
+            if (!currentSession) {
+                alert('Please join a session first');
+                return;
+            }
+
+            log(`Sending: ${message}`);
+            socket.emit('chat_message', {
+                session_id: currentSession,
+                message: message
+            });
+
+            document.getElementById('chatMessage').value = '';
+        }
+
+        // Auto-connect on page load
+        window.onload = () => {
+            log('Canvas Collaboration Test Page Loaded');
+            log('Open this page in 2+ tabs/browsers to test real-time sync');
+        };
+
+        // Allow Enter key to send message
+        document.getElementById('chatMessage').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+    </script>
+</body>
+</html>

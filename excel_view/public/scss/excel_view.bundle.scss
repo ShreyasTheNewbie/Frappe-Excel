@@ -2049,7 +2049,6 @@
 .ev-jc-node-fields {
 	overflow-y: auto;
 	max-height: 390px;
-	padding: 2px 0;
 
 	// Thin scrollbar
 	scrollbar-width: thin;
@@ -2074,6 +2073,28 @@
 		background: #eef4fb;
 		border-bottom-color: #c8ddf8;
 	}
+
+	// System field styling (parent, parenttype for child tables)
+	&--system {
+		opacity: 0.7;
+		font-style: italic;
+		background: rgba(0, 0, 0, 0.02);
+
+		.ev-jc-field-label {
+			color: #666;
+			font-size: 11px;
+
+			&::before {
+				content: "⚙️ ";
+				opacity: 0.5;
+			}
+		}
+
+		&:hover {
+			opacity: 0.85;
+			background: rgba(0, 0, 0, 0.04);
+		}
+	}
 }
 
 .ev-jc-field-label {
@@ -2091,6 +2112,15 @@
 	width: 13px;
 	height: 13px;
 	accent-color: var(--ev-green, #1d6f42);
+}
+
+// Connected field pinned to top of scroll container
+.ev-jc-field--pinned {
+	position: sticky;
+	top: 0;
+	z-index: 2;
+	background: #eaf5ee !important;
+	border-bottom: 1px solid rgba(29, 111, 66, 0.15);
 }
 
 // Field row highlight when checkbox is checked
@@ -3014,3 +3044,1064 @@ body.ev-jc-open {
 	margin-top: 6px;
 	line-height: 1.4;
 }
+
+// ── V2.5+ Generative BI Chat UI ──────────────────────────────────────────────
+
+.ev-jc-genbi-chat {
+	position: fixed;
+	right: 20px;
+	top: 80px;
+	bottom: 20px;
+	width: 420px;
+	background: #fff;
+	border-radius: 12px;
+	box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+	display: flex;
+	flex-direction: column;
+	z-index: 1600;  // Above canvas overlay
+}
+
+.ev-jc-chat-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 16px 20px;
+	border-bottom: 1px solid #e0e0e0;
+	background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+	color: #fff;
+	border-radius: 12px 12px 0 0;
+	font-weight: 600;
+	font-size: 15px;
+
+	.ev-jc-chat-close {
+		color: #fff;
+		opacity: 0.8;
+		border: none;
+		background: rgba(255,255,255,0.15);
+		border-radius: 4px;
+		padding: 4px 8px;
+		font-size: 14px;
+		&:hover { opacity: 1; background: rgba(255,255,255,0.25); }
+	}
+}
+
+.ev-jc-chat-messages {
+	flex: 1;
+	overflow-y: auto;
+	padding: 16px;
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+}
+
+.ev-jc-chat-bubble {
+	max-width: 85%;
+	padding: 10px 14px;
+	border-radius: 12px;
+	font-size: 13px;
+	line-height: 1.5;
+	word-wrap: break-word;
+
+	&--system {
+		align-self: flex-start;
+		background: #f5f5f5;
+		color: #333;
+		border: 1px solid #e0e0e0;
+	}
+
+	&--user {
+		align-self: flex-end;
+		background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+		color: #fff;
+		border-radius: 12px 12px 2px 12px;
+	}
+
+	&--error {
+		background: #ffebee !important;
+		color: #c62828 !important;
+		border-color: #ef9a9a !important;
+	}
+
+	&--success {
+		background: #e8f5e9 !important;
+		color: #2e7d32 !important;
+		border-color: #a5d6a7 !important;
+	}
+}
+
+.ev-jc-chat-option-card {
+	background: #fff;
+	border: 2px solid #e0e0e0;
+	border-radius: 10px;
+	padding: 12px;
+	cursor: pointer;
+	transition: all 0.2s ease;
+	margin: 4px 0;
+
+	&:hover {
+		border-color: #667eea;
+		box-shadow: 0 4px 12px rgba(102,126,234,0.15);
+		transform: translateY(-2px);
+	}
+
+	code {
+		background: #f5f5f5;
+		padding: 2px 6px;
+		border-radius: 4px;
+		font-size: 9px;
+		color: #666;
+	}
+}
+
+.ev-jc-chat-input-wrapper {
+	display: flex;
+	gap: 8px;
+	padding: 12px 16px;
+	border-top: 1px solid #e0e0e0;
+	background: #fafafa;
+	border-radius: 0 0 12px 12px;
+
+	.ev-jc-chat-input {
+		flex: 1;
+		border: 1px solid #ddd;
+		border-radius: 20px;
+		padding: 8px 16px;
+		font-size: 13px;
+		outline: none;
+		transition: border-color 0.2s;
+
+		&:focus {
+			border-color: #667eea;
+			box-shadow: 0 0 0 3px rgba(102,126,234,0.1);
+		}
+	}
+
+	.ev-jc-chat-send {
+		border-radius: 20px;
+		padding: 8px 20px;
+		font-size: 13px;
+		font-weight: 600;
+		background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+		border: none;
+		color: #fff;
+		transition: transform 0.2s;
+
+		&:hover:not(:disabled) {
+			transform: scale(1.05);
+		}
+
+		&:disabled {
+			opacity: 0.6;
+			cursor: not-allowed;
+		}
+	}
+}
+
+// ── GenBI AI Response Components ──────────────────────────────────────────
+
+// Disambiguation buttons
+.ev-jc-disambig-buttons {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+
+	.ev-jc-disambig-btn {
+		background: #667eea;
+		color: #fff;
+		border: none;
+		border-radius: 6px;
+		padding: 8px 16px;
+		font-size: 12px;
+		font-weight: 600;
+		cursor: pointer;
+		transition: all 0.2s;
+
+		&:hover {
+			background: #5568d3;
+			transform: translateY(-1px);
+		}
+	}
+}
+
+// Explanation bubble
+.ev-jc-explanation {
+	max-width: 95% !important;
+	background: #f8f9fa !important;
+	border-left: 4px solid #667eea !important;
+
+	.ev-jc-explanation-header {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		margin-bottom: 12px;
+		color: #667eea;
+
+		svg {
+			flex-shrink: 0;
+		}
+	}
+
+	.ev-jc-explanation-path {
+		background: #fff;
+		padding: 8px 12px;
+		border-radius: 6px;
+		font-size: 12px;
+		font-weight: 600;
+		margin-bottom: 12px;
+		border: 1px solid #e0e0e0;
+	}
+
+	.ev-jc-explanation-summary {
+		margin-bottom: 12px;
+		font-size: 13px;
+		line-height: 1.6;
+	}
+
+	.ev-jc-explanation-steps {
+		margin-bottom: 12px;
+
+		strong {
+			display: block;
+			margin-bottom: 6px;
+			font-size: 12px;
+			color: #667eea;
+		}
+
+		ol {
+			margin: 0;
+			padding-left: 20px;
+			font-size: 12px;
+			line-height: 1.6;
+
+			li {
+				margin-bottom: 6px;
+			}
+		}
+	}
+
+	.ev-jc-explanation-context {
+		background: #fff9e6;
+		padding: 8px 12px;
+		border-radius: 6px;
+		font-size: 12px;
+		margin-bottom: 8px;
+		border-left: 3px solid #ffc107;
+	}
+
+	.ev-jc-explanation-confidence {
+		font-size: 11px;
+		color: #666;
+		border-top: 1px solid #e0e0e0;
+		padding-top: 8px;
+	}
+
+	.ev-jc-explanation-comparison {
+		margin-top: 8px;
+		padding-top: 8px;
+		border-top: 1px solid #e0e0e0;
+		font-size: 11px;
+		color: #666;
+		font-style: italic;
+	}
+}
+
+// Data insight bubble
+.ev-jc-data-insight {
+	max-width: 90% !important;
+	background: #e8f5e9 !important;
+	border-left: 4px solid #4caf50 !important;
+
+	.ev-jc-insight-header {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		margin-bottom: 10px;
+		color: #2e7d32;
+
+		svg {
+			flex-shrink: 0;
+		}
+	}
+
+	.ev-jc-insight-content {
+		font-size: 12px;
+		line-height: 1.6;
+
+		.ev-jc-insight-row-count {
+			margin-bottom: 8px;
+
+			strong {
+				color: #2e7d32;
+			}
+		}
+
+		.ev-jc-insight-filters {
+			margin-top: 10px;
+			padding-top: 10px;
+			border-top: 1px solid #c8e6c9;
+
+			small {
+				display: block;
+				margin-bottom: 4px;
+				color: #2e7d32;
+			}
+		}
+	}
+}
+
+// Data availability badges
+.ev-jc-data-badge {
+	display: inline-flex;
+	align-items: center;
+	padding: 2px 8px;
+	border-radius: 10px;
+	font-size: 10px;
+	font-weight: 600;
+	margin-left: 6px;
+
+	&--good {
+		background: #e8f5e9;
+		color: #2e7d32;
+	}
+
+	&--warn {
+		background: #fff3e0;
+		color: #e65100;
+	}
+}
+
+// Follow-up suggestion pills
+.ev-jc-followup-pills {
+	align-self: flex-start;
+	max-width: 100%;
+	background: #f0f0f0;
+	border-radius: 8px;
+	padding: 10px 12px;
+	margin-top: 8px;
+
+	.ev-jc-pills-label {
+		font-size: 11px;
+		color: #666;
+		margin-bottom: 8px;
+		font-weight: 600;
+	}
+
+	.ev-jc-pills-container {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px;
+	}
+
+	.ev-jc-followup-pill {
+		background: #fff;
+		border: 1px solid #d0d0d0;
+		border-radius: 12px;
+		padding: 6px 12px;
+		font-size: 11px;
+		color: #667eea;
+		font-weight: 600;
+		cursor: pointer;
+		transition: all 0.2s;
+
+		&:hover {
+			background: #667eea;
+			color: #fff;
+			border-color: #667eea;
+			transform: translateY(-1px);
+		}
+	}
+}
+
+// Results header icon
+.ev-jc-results-header {
+	display: flex !important;
+	align-items: center;
+	gap: 12px;
+	background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%) !important;
+	border: none !important;
+	padding: 14px !important;
+
+	.ev-jc-results-icon {
+		font-size: 24px;
+		flex-shrink: 0;
+	}
+}
+
+// Card components
+.ev-jc-card-header {
+	display: flex;
+	align-items: flex-start;
+	gap: 10px;
+
+	.ev-jc-card-icon {
+		flex-shrink: 0;
+		color: #667eea;
+		margin-top: 2px;
+	}
+
+	.ev-jc-card-content {
+		flex: 1;
+		min-width: 0;
+	}
+
+	.ev-jc-card-title {
+		font-weight: 600;
+		font-size: 12px;
+		color: #333;
+		margin-bottom: 6px;
+		word-break: break-word;
+	}
+
+	.ev-jc-card-meta {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 10px;
+		font-size: 10px;
+		color: #666;
+
+		.ev-jc-meta-item {
+			display: inline-flex;
+			align-items: center;
+			gap: 4px;
+
+			svg {
+				flex-shrink: 0;
+			}
+		}
+	}
+
+	.ev-jc-confidence-badge {
+		flex-shrink: 0;
+		color: #fff;
+		font-size: 10px;
+		font-weight: 700;
+		padding: 4px 8px;
+		border-radius: 10px;
+		white-space: nowrap;
+	}
+}
+
+// Thinking indicator
+.ev-jc-thinking {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+
+	.ev-jc-thinking-dots {
+		display: flex;
+		gap: 4px;
+
+		.ev-jc-dot {
+			width: 6px;
+			height: 6px;
+			background: #667eea;
+			border-radius: 50%;
+			animation: ev-jc-dot-pulse 1.4s infinite ease-in-out both;
+
+			&:nth-child(1) { animation-delay: -0.32s; }
+			&:nth-child(2) { animation-delay: -0.16s; }
+		}
+	}
+
+	.ev-jc-thinking-text {
+		font-size: 12px;
+		color: #666;
+		font-style: italic;
+	}
+}
+
+@keyframes ev-jc-dot-pulse {
+	0%, 80%, 100% { transform: scale(0.8); opacity: 0.5; }
+	40% { transform: scale(1.2); opacity: 1; }
+}
+
+// Chat welcome section
+.ev-jc-chat-welcome {
+	margin-bottom: 16px;
+	font-size: 14px;
+	color: #333;
+}
+
+.ev-jc-chat-examples {
+	.ev-jc-example-label {
+		font-size: 11px;
+		color: #666;
+		margin-bottom: 8px;
+		font-weight: 600;
+	}
+
+	.ev-jc-example-chips {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 8px;
+	}
+
+	.ev-jc-example-chip {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		background: #fff;
+		border: 1px solid #d0d0d0;
+		border-radius: 16px;
+		padding: 8px 14px;
+		font-size: 12px;
+		color: #667eea;
+		font-weight: 600;
+		cursor: pointer;
+		transition: all 0.2s;
+
+		&:hover {
+			background: #667eea;
+			color: #fff;
+			border-color: #667eea;
+			transform: translateY(-1px);
+
+			svg {
+				opacity: 1;
+			}
+		}
+
+		svg {
+			flex-shrink: 0;
+			opacity: 0.7;
+		}
+	}
+}
+
+.ev-jc-chat-header-content {
+	display: flex;
+	align-items: center;
+
+	.ev-jc-chat-title {
+		font-size: 15px;
+		font-weight: 600;
+	}
+}
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Figma-Style Zoom Controls (Bottom-Right Corner)
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.ev-jc-zoom-controls {
+	position: absolute;
+	bottom: 20px;
+	right: 20px;
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	background: white;
+	border: 1px solid #d1d5db;
+	border-radius: 8px;
+	padding: 4px;
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+	z-index: 100;
+	user-select: none;
+
+	.ev-jc-zoom-btn {
+		width: 28px;
+		height: 28px;
+		border: none;
+		background: transparent;
+		border-radius: 4px;
+		cursor: pointer;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		font-size: 16px;
+		color: #374151;
+		transition: background-color 0.15s ease;
+		padding: 0;
+
+		&:hover {
+			background: #f3f4f6;
+		}
+
+		&:active {
+			background: #e5e7eb;
+		}
+
+		svg {
+			pointer-events: none;
+		}
+	}
+
+	.ev-jc-zoom-level {
+		min-width: 48px;
+		text-align: center;
+		font-size: 12px;
+		color: #6b7280;
+		font-weight: 500;
+		padding: 0 4px;
+	}
+}
+
+/* Smooth transitions for zoom/pan */
+.ev-jc-nodes,
+.ev-jc-svg {
+	transition: transform 0.15s ease-out;
+	transform-origin: 0 0;
+	will-change: transform;
+}
+
+/* Space key cursor feedback */
+.ev-jc-stage[style*="cursor: grab"],
+.ev-jc-stage[style*="cursor: grabbing"] {
+	.ev-jc-nodes,
+	.ev-jc-svg {
+		pointer-events: none;
+	}
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Generative BI - Modern UI/UX
+   ══════════════════════════════════════════════════════════════════════════ */
+
+// Chat Header
+.ev-jc-chat-header {
+	background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+	color: white;
+	padding: 16px 20px;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	border-radius: 12px 12px 0 0;
+	box-shadow: 0 2px 8px rgba(102, 126, 234, 0.2);
+
+	.ev-jc-chat-header-content {
+		display: flex;
+		align-items: center;
+		flex: 1;
+	}
+
+	.ev-jc-chat-title {
+		font-size: 16px;
+		font-weight: 600;
+		letter-spacing: -0.3px;
+	}
+
+	.ev-jc-chat-close {
+		width: 32px;
+		height: 32px;
+		border: none;
+		background: rgba(255, 255, 255, 0.2);
+		border-radius: 6px;
+		cursor: pointer;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		color: white;
+		transition: all 0.2s ease;
+
+		&:hover {
+			background: rgba(255, 255, 255, 0.3);
+		}
+
+		&:active {
+			transform: scale(0.95);
+		}
+	}
+}
+
+// Welcome Message
+.ev-jc-chat-welcome {
+	font-size: 14px;
+	line-height: 1.6;
+	margin-bottom: 16px;
+}
+
+// Example Chips
+.ev-jc-chat-examples {
+	margin-top: 12px;
+
+	.ev-jc-example-label {
+		font-size: 11px;
+		text-transform: uppercase;
+		letter-spacing: 0.5px;
+		opacity: 0.7;
+		font-weight: 600;
+		margin-bottom: 8px;
+	}
+
+	.ev-jc-example-chips {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+	}
+
+	.ev-jc-example-chip {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 10px 14px;
+		background: linear-gradient(135deg, rgba(102, 126, 234, 0.08) 0%, rgba(118, 75, 162, 0.08) 100%);
+		border: 1.5px solid rgba(102, 126, 234, 0.2);
+		border-radius: 8px;
+		cursor: pointer;
+		transition: all 0.2s ease;
+		font-size: 13px;
+		color: #667eea;
+		font-weight: 500;
+		text-align: left;
+
+		svg {
+			flex-shrink: 0;
+			opacity: 0.7;
+		}
+
+		&:hover {
+			background: linear-gradient(135deg, rgba(102, 126, 234, 0.15) 0%, rgba(118, 75, 162, 0.15) 100%);
+			border-color: rgba(102, 126, 234, 0.4);
+			transform: translateX(4px);
+
+			svg {
+				opacity: 1;
+			}
+		}
+
+		&:active {
+			transform: translateX(4px) scale(0.98);
+		}
+	}
+}
+
+// Input Wrapper
+.ev-jc-chat-input-wrapper {
+	padding: 16px 20px;
+	background: #f9fafb;
+	border-top: 1px solid #e5e7eb;
+	display: flex;
+	gap: 12px;
+	border-radius: 0 0 12px 12px;
+
+	.ev-jc-chat-input {
+		flex: 1;
+		border: 2px solid #e5e7eb;
+		border-radius: 8px;
+		padding: 10px 14px;
+		font-size: 14px;
+		transition: all 0.2s ease;
+
+		&:focus {
+			border-color: #667eea;
+			box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+			outline: none;
+		}
+	}
+
+	.ev-jc-chat-send {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		padding: 10px 20px;
+		background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+		border: none;
+		border-radius: 8px;
+		color: white;
+		font-weight: 600;
+		cursor: pointer;
+		transition: all 0.2s ease;
+		box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+
+		svg {
+			width: 16px;
+			height: 16px;
+		}
+
+		&:hover {
+			transform: translateY(-2px);
+			box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+		}
+
+		&:active {
+			transform: translateY(0);
+		}
+
+		&:disabled {
+			opacity: 0.6;
+			cursor: not-allowed;
+			transform: none;
+		}
+	}
+}
+
+// Animated Thinking Indicator
+.ev-jc-thinking {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 12px 16px !important;
+	background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(118, 75, 162, 0.05) 100%) !important;
+	border-left: 3px solid #667eea !important;
+
+	.ev-jc-thinking-dots {
+		display: flex;
+		gap: 4px;
+	}
+
+	.ev-jc-dot {
+		width: 8px;
+		height: 8px;
+		background: #667eea;
+		border-radius: 50%;
+		animation: thinking-bounce 1.4s ease-in-out infinite;
+
+		&:nth-child(1) {
+			animation-delay: 0s;
+		}
+
+		&:nth-child(2) {
+			animation-delay: 0.2s;
+		}
+
+		&:nth-child(3) {
+			animation-delay: 0.4s;
+		}
+	}
+
+	.ev-jc-thinking-text {
+		font-size: 13px;
+		color: #667eea;
+		font-weight: 500;
+		opacity: 0.8;
+	}
+}
+
+@keyframes thinking-bounce {
+	0%, 80%, 100% {
+		transform: translateY(0);
+		opacity: 0.5;
+	}
+	40% {
+		transform: translateY(-8px);
+		opacity: 1;
+	}
+}
+
+// Option Cards - Modern Design
+.ev-jc-chat-option-card {
+	border: 2px solid #e5e7eb;
+	border-radius: 10px;
+	padding: 14px 16px;
+	background: white;
+	transition: all 0.2s ease;
+	cursor: pointer;
+
+	&:hover {
+		border-color: #667eea;
+		box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
+		transform: translateY(-2px);
+	}
+
+	&:active {
+		transform: translateY(0);
+	}
+
+	strong {
+		color: #1f2937;
+		font-weight: 600;
+	}
+
+	.badge {
+		font-weight: 600;
+		padding: 4px 10px;
+		border-radius: 6px;
+		font-size: 11px;
+	}
+}
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Generative BI - Clean Cards with Sequential Animation
+   ══════════════════════════════════════════════════════════════════════════ */
+
+// Results Header
+.ev-jc-results-header {
+	display: flex;
+	align-items: flex-start;
+	gap: 12px;
+	background: linear-gradient(135deg, rgba(102, 126, 234, 0.08) 0%, rgba(118, 75, 162, 0.08) 100%) !important;
+	border-left: 3px solid #667eea !important;
+	padding: 14px 16px !important;
+
+	.ev-jc-results-icon {
+		font-size: 20px;
+		line-height: 1;
+	}
+}
+
+// Sequential Card Animation
+.ev-jc-card-animate {
+	opacity: 0;
+	transform: translateY(10px);
+	animation: card-fade-in 0.4s ease-out forwards;
+}
+
+@keyframes card-fade-in {
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+// Modern Card Design
+.ev-jc-chat-option-card {
+	border: 1.5px solid #e5e7eb !important;
+	border-radius: 10px !important;
+	padding: 0 !important;
+	background: white !important;
+	overflow: hidden;
+	transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+	cursor: pointer;
+	margin-bottom: 10px;
+
+	&:hover {
+		border-color: #667eea !important;
+		box-shadow: 0 8px 16px rgba(102, 126, 234, 0.15) !important;
+		transform: translateY(-3px) scale(1.01) !important;
+
+		.ev-jc-card-icon {
+			background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+			color: white;
+		}
+
+		.ev-jc-confidence-badge {
+			transform: scale(1.1);
+		}
+	}
+
+	&:active {
+		transform: translateY(-1px) scale(0.99) !important;
+	}
+
+	.ev-jc-card-header {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		padding: 14px 16px;
+	}
+
+	.ev-jc-card-icon {
+		width: 40px;
+		height: 40px;
+		border-radius: 8px;
+		background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		flex-shrink: 0;
+		transition: all 0.25s ease;
+		color: #667eea;
+
+		svg {
+			width: 18px;
+			height: 18px;
+		}
+	}
+
+	.ev-jc-card-content {
+		flex: 1;
+		min-width: 0;
+	}
+
+	.ev-jc-card-title {
+		font-size: 13px;
+		font-weight: 600;
+		color: #1f2937;
+		margin-bottom: 6px;
+		line-height: 1.4;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.ev-jc-card-meta {
+		display: flex;
+		align-items: center;
+		gap: 12px;
+		flex-wrap: wrap;
+	}
+
+	.ev-jc-meta-item {
+		display: flex;
+		align-items: center;
+		gap: 4px;
+		font-size: 11px;
+		color: #6b7280;
+		font-weight: 500;
+
+		svg {
+			opacity: 0.7;
+		}
+	}
+
+	.ev-jc-confidence-badge {
+		padding: 6px 12px;
+		border-radius: 6px;
+		font-size: 11px;
+		font-weight: 700;
+		color: white;
+		flex-shrink: 0;
+		transition: transform 0.2s ease;
+	}
+}
+
+// Show More Button
+.ev-jc-chat-show-more {
+	text-align: center;
+	margin: 16px 0 !important;
+
+	button {
+		border-radius: 8px !important;
+		padding: 10px 20px !important;
+		font-weight: 600 !important;
+		transition: all 0.2s ease !important;
+		border: 2px dashed #d1d5db !important;
+		background: transparent !important;
+
+		&:hover {
+			border-color: #667eea !important;
+			background: rgba(102, 126, 234, 0.05) !important;
+			transform: translateY(-2px);
+		}
+	}
+}
+
+
+// Fix for invisible cards
+.ev-jc-chat-option-card {
+	display: block !important;
+	min-height: 60px !important;
+	visibility: visible !important;
+	position: relative !important;
+}
+
+
+// Smooth expand on hover - show full path
+.ev-jc-chat-option-card {
+	.ev-jc-card-title {
+		transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		max-height: 20px;
+	}
+
+	&:hover {
+		.ev-jc-card-title {
+			white-space: normal;
+			overflow: visible;
+			text-overflow: clip;
+			max-height: 200px;
+			line-height: 1.6;
+		}
+
+		.ev-jc-card-header {
+			align-items: flex-start;
+		}
+	}
+}
+
+
+// Canvas Collaboration Sidebar Styles
+@import 'canvas_collaboration';

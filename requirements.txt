@@ -5,3 +5,7 @@ scipy>=1.11
 numpy>=1.24
 pandas>=2.0
 RapidFuzz>=3.0
+spacy>=3.7
+# spaCy English model - auto-installs without manual download
+https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl
+sentence-transformers>=2.2

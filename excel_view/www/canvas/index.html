@@ -1,0 +1,103 @@
+{% extends "templates/web.html" %}
+
+{% block title %}{{ session_title }}{% endblock %}
+
+{% block page_content %}
+<div class="canvas-session-page"
+     data-session-id="{{ session_id }}"
+     data-session-name="{{ session_name }}"
+     data-base-doctype="{{ base_doctype }}"
+     style="height: calc(100vh - 60px); display: flex;">
+
+	<!-- Sidebar will be rendered here by JavaScript -->
+	<div id="canvas-sidebar-container"></div>
+
+	<!-- Main canvas area -->
+	<div class="canvas-main-area" style="flex: 1; background: #f7fafc; position: relative;">
+		<div style="padding: 40px; text-align: center;">
+			<h2 style="color: #2d3748; margin-bottom: 16px;">{{ session_title }}</h2>
+			<p style="color: #718096; margin-bottom: 24px;">
+				Canvas Session for {{ base_doctype }}
+			</p>
+			<div style="background: white; padding: 32px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); max-width: 600px; margin: 0 auto;">
+				<p style="color: #4a5568; line-height: 1.6;">
+					<strong>Session Active!</strong><br>
+					The collaboration sidebar will appear on the left.<br>
+					Canvas drawing features will be added in Phase 4.
+				</p>
+			</div>
+		</div>
+	</div>
+</div>
+
+<style>
+.canvas-session-page {
+	margin: -15px;
+}
+</style>
+{% endblock %}
+
+{% block script %}
+<script>
+frappe.ready(function() {
+	const $page = $('.canvas-session-page');
+	const session_id = $page.data('session-id');
+	const session_name = $page.data('session-name');
+	const base_doctype = $page.data('base-doctype');
+
+	console.log('🎨 Canvas Session Page Loaded:', { session_id, session_name, base_doctype });
+
+	// Create a minimal canvas object for the sidebar
+	const canvas = {
+		session_id: session_id,
+		base_doctype: base_doctype,
+		_join_session: async function(sid) {
+			console.log('📍 Joining session:', sid);
+			// Auto-join this session
+			try {
+				const join_result = await frappe.call({
+					method: 'excel_view.excel_view.doctype.canvas_session.canvas_session.join_canvas_session',
+					args: { session_id: sid }
+				});
+
+				const online_users = join_result.message.online_users || [];
+
+				// Load session data
+				const result = await frappe.call({
+					method: 'excel_view.excel_view.doctype.canvas_session.canvas_session.get_session',
+					args: { session_id: sid }
+				});
+
+				const session_data = result.message;
+
+				// Initialize sidebar
+				if (!window.canvas_sidebar) {
+					window.canvas_sidebar = new frappe.canvas.CollaborationSidebarVue({
+						parent: $('#canvas-sidebar-container'),
+						canvas: canvas
+					});
+				}
+
+				// Show sidebar with data
+				window.canvas_sidebar.refresh(session_data, online_users);
+				window.canvas_sidebar.show();
+
+				frappe.show_alert({
+					message: __('Joined collaboration session'),
+					indicator: 'green'
+				});
+			} catch (err) {
+				console.error('Failed to join session:', err);
+				frappe.show_alert({
+					message: __('Failed to join session'),
+					indicator: 'red'
+				});
+			}
+		}
+	};
+
+	// Auto-join the session when page loads
+	canvas._join_session(session_id);
+});
+</script>
+{% endblock %}

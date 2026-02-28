@@ -51,6 +51,18 @@ frappe.views.excel.JoinCanvas = class JoinCanvas {
 		this._on_key           = this._on_key.bind(this);
 		this._doc_mousemove    = this._on_doc_mousemove.bind(this);
 		this._doc_mouseup      = this._on_doc_mouseup.bind(this);
+
+		// Figma-style Zoom & Pan state
+		this._zoom = 1.0;           // Current zoom level (1.0 = 100%)
+		this._pan_x = 0;            // Pan offset X
+		this._pan_y = 0;            // Pan offset Y
+		this._is_panning = false;   // Space or middle-mouse panning
+		this._space_pressed = false; // Track space key state
+
+		// Collaboration state
+		this.active_session_id = null;
+		this.collab_sidebar = null;
+		this.online_users = [];
 	}
 
 	// ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -66,6 +78,8 @@ frappe.views.excel.JoinCanvas = class JoinCanvas {
 	 */
 	open(initial_config = null) {
 		this._build_overlay();
+		// Initialize collaboration features
+		this._init_collaboration();
 		// Mark body so CSS can bump frappe modal z-index above canvas (F3)
 		document.body.classList.add("ev-jc-open");
 		// Remember that the canvas is open — survives page refresh
@@ -93,7 +107,13 @@ frappe.views.excel.JoinCanvas = class JoinCanvas {
 	}
 
 	close() {
+		// Leave collaboration session if active
+		if (this.active_session_id) {
+			this._leave_session();
+		}
 		$(document).off("keydown.ev-jc");
+		$(document).off("keydown.ev-jc-space");
+		$(document).off("keyup.ev-jc-space");
 		document.body.classList.remove("ev-jc-open");
 		this.$overlay?.remove();
 		this.$overlay = null;
@@ -131,6 +151,14 @@ frappe.views.excel.JoinCanvas = class JoinCanvas {
 						        title="${__("Find Path — auto-chain via shortest link path")}">
 							🔗 ${__("Path")}
 						</button>
+						<button class="btn btn-sm btn-success ev-jc-generate-btn"
+						        title="${__("Generative BI — describe what you want, AI builds the canvas")}">
+							💬 ${__("Generate")}
+						</button>
+						<button class="btn btn-sm btn-default ev-jc-collaborate-btn"
+						        title="${__("Start or join a collaborative canvas session")}">
+							👥 ${__("Collaborate")}
+						</button>
 						<button class="btn btn-sm btn-default ev-jc-add-btn">
 							+ ${__("Add DocType")}
 						</button>
@@ -158,12 +186,23 @@ frappe.views.excel.JoinCanvas = class JoinCanvas {
 						<b>${__("How to use:")}</b>
 						${__("1. Add a DocType node. &nbsp; 2. Drag ○ (right side) → drop on ○ (left side of another field) to create a join. &nbsp; 3. Check fields to include in the grid. &nbsp; 4. Click Apply.")}
 					</div>
+					<!-- Figma-style zoom controls (bottom-right corner) -->
+					<div class="ev-jc-zoom-controls">
+						<button class="ev-jc-zoom-btn ev-jc-zoom-out" title="${__("Zoom Out")} (Ctrl + Scroll)">−</button>
+						<span class="ev-jc-zoom-level">100%</span>
+						<button class="ev-jc-zoom-btn ev-jc-zoom-in" title="${__("Zoom In")} (Ctrl + Scroll)">+</button>
+						<button class="ev-jc-zoom-btn ev-jc-zoom-fit" title="${__("Fit to Screen")} (Shift+1)">
+							<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+								<path d="M1 1h6v2H3v4H1V1zm14 0h-6v2h4v4h2V1zM1 15h6v-2H3v-4H1v6zm14 0h-6v-2h4v-4h2v6z"/>
+							</svg>
+						</button>
+					</div>
 				</div>
 			</div>
 		`).appendTo(document.body);
 
 		this.$stage = this.$overlay.find(".ev-jc-stage");
-		this.$svg   = this.$overlay.find(".ev-jc-svg")[0];
+		this.$svg   = this.$overlay.find(".ev-jc-svg");
 		this.$nodes = this.$overlay.find(".ev-jc-nodes");
 
 		// Header button events
@@ -177,6 +216,74 @@ frappe.views.excel.JoinCanvas = class JoinCanvas {
 		this.$overlay.find(".ev-jc-patterns-btn").on("click", () => this._run_pattern_mining());
 		// V2.5 AI Analysis button
 		this.$overlay.find(".ev-jc-analyze-btn").on("click",  () => this._open_analyze_panel());
+		// V2.5+ Generative BI button
+		this.$overlay.find(".ev-jc-generate-btn").on("click", () => this._prompt_generative_query());
+		// Collaboration button
+		this.$overlay.find(".ev-jc-collaborate-btn").on("click", () => this._toggle_collaboration());
+
+		// ── Figma-style Zoom & Pan Controls ────────────────────────────────
+
+		// Zoom button controls
+		this.$overlay.find(".ev-jc-zoom-in").on("click", () => this._zoom_in());
+		this.$overlay.find(".ev-jc-zoom-out").on("click", () => this._zoom_out());
+		this.$overlay.find(".ev-jc-zoom-fit").on("click", () => this._zoom_fit());
+
+		// Mouse wheel: Ctrl+wheel = zoom, Space+wheel = pan (Figma style)
+		this.$stage[0].addEventListener("wheel", (e) => {
+			// Ctrl/Cmd + wheel = zoom (centered on cursor)
+			if (e.ctrlKey || e.metaKey) {
+				e.preventDefault();
+
+				// Get mouse position relative to stage
+				const rect = this.$stage[0].getBoundingClientRect();
+				const mouseX = e.clientX - rect.left;
+				const mouseY = e.clientY - rect.top;
+
+				// Zoom centered on mouse cursor
+				const delta = e.deltaY > 0 ? -0.1 : 0.1;
+				this._zoom_at_point(mouseX, mouseY, this._zoom + delta);
+			}
+			// Space + wheel/trackpad scroll = pan (like Figma)
+			else if (this._space_pressed) {
+				e.preventDefault();
+
+				// Pan based on scroll delta
+				this._pan_x -= e.deltaX;
+				this._pan_y -= e.deltaY;
+				this._apply_transform();
+			}
+		}, { passive: false });
+
+		// Space + Drag to pan (Figma style)
+		$(document).on("keydown.ev-jc-space", (e) => {
+			// Only handle if canvas is open and not typing in input/textarea
+			if (e.key === " " && !this._space_pressed && !$(e.target).is("input, textarea") && this.$overlay) {
+				e.preventDefault();  // Prevent page scroll
+				this._space_pressed = true;
+				this.$overlay.css("cursor", "grab");
+			}
+		});
+
+		$(document).on("keyup.ev-jc-space", (e) => {
+			if (e.key === " ") {
+				this._space_pressed = false;
+				if (!this._is_panning) {
+					this.$overlay.css("cursor", "");
+				}
+			}
+		});
+
+		// Middle mouse or Space+drag to pan
+		// Listen on overlay (not just stage) to catch all clicks
+		this.$overlay.on("mousedown", (e) => {
+			// Middle mouse button (button 1) or Space+left click
+			if (e.button === 1 || (e.button === 0 && this._space_pressed)) {
+				e.preventDefault();
+				e.stopPropagation();
+				this._start_pan(e);
+			}
+		});
+
 	}
 
 	// ── Node management ───────────────────────────────────────────────────────
@@ -217,8 +324,9 @@ frappe.views.excel.JoinCanvas = class JoinCanvas {
 			"Column Break", "Section Break", "Tab Break", "Fold",
 			"Heading", "HTML", "Custom HTML", "Table", "Table MultiSelect", "Password",
 		]);
-		// Child table system fields — not useful for joins/display
-		const CHILD_SYS_FIELDS = new Set(["parent", "parenttype", "parentfield", "idx"]);
+		// Child table system fields — only filter truly useless ones
+		// Note: parent & parenttype are kept selectable (useful for joins and polymorphic relationships)
+		const CHILD_SYS_FIELDS = new Set(["parentfield", "idx"]);
 
 		const fields = (meta?.fields || []).filter(
 			df => !SKIP_TYPES.has(df.fieldtype) && !df.is_virtual && df.fieldname !== "name"
@@ -260,6 +368,18 @@ frappe.views.excel.JoinCanvas = class JoinCanvas {
 		// "name" field row (always shown)
 		fields_div.appendChild(this._make_field_row({ fieldname: "name", label: "Name (ID)" }, id, base));
 
+		// Child table system fields — add parent field for wiring (parenttype optional for future)
+		// These are NOT in meta.fields but needed for intelligent AI auto-wire to work
+		if (is_child) {
+			const parent_row = this._make_field_row({
+				fieldname: "parent",
+				label: "Parent (System)",
+				is_system: true
+			}, id, base);
+			parent_row.classList.add("ev-jc-field--system");
+			fields_div.appendChild(parent_row);
+		}
+
 		// All other fields
 		fields.forEach(df => {
 			fields_div.appendChild(this._make_field_row(df, id, base));
@@ -267,6 +387,9 @@ frappe.views.excel.JoinCanvas = class JoinCanvas {
 
 		node_el.appendChild(fields_div);
 		this.$nodes[0].appendChild(node_el);
+
+		// Re-render edges when field list is scrolled (ports move vertically)
+		fields_div.addEventListener("scroll", () => this._render_edges());
 
 		// Store node — selected_fields Set tracked per-node (F2)
 		this.nodes.set(id, { id, doctype, el: node_el, selected_fields: new Set() });
@@ -734,7 +857,13 @@ frappe.views.excel.JoinCanvas = class JoinCanvas {
 	// ── Node dragging ─────────────────────────────────────────────────────────
 
 	_bind_node_drag(handle_el, node_el) {
+		// Phase 4: Throttling for real-time position broadcasts
+		let last_broadcast_time = 0;
+		const BROADCAST_THROTTLE = 100; // ms - max 10 updates/sec
+
 		handle_el.addEventListener("pointerdown", (e) => {
+			// Figma-style: Disable node drag when Space is pressed (for canvas panning)
+			if (this._space_pressed) return;
 			if (e.target.closest(".ev-jc-node-remove") || e.target.closest(".ev-jc-node-ai-target")) return;
 			e.preventDefault();
 			node_el.setPointerCapture(e.pointerId);
@@ -743,14 +872,27 @@ frappe.views.excel.JoinCanvas = class JoinCanvas {
 				px: node_el.offsetLeft, py: node_el.offsetTop,
 			};
 			node_el.onpointermove = (e) => {
-				node_el.style.left = (origin.px + e.clientX - origin.mx) + "px";
-				node_el.style.top  = (origin.py + e.clientY - origin.my) + "px";
+				// Update position locally (immediate, no lag)
+				const new_left = origin.px + e.clientX - origin.mx;
+				const new_top = origin.py + e.clientY - origin.my;
+				node_el.style.left = new_left + "px";
+				node_el.style.top = new_top + "px";
 				this._render_edges();
+
+				// Phase 4: Throttled broadcast to other users
+				const now = Date.now();
+				if (this.active_session_id && (now - last_broadcast_time) > BROADCAST_THROTTLE) {
+					this._broadcast_node_position(node_el.dataset.id, {
+						left: Math.round(new_left),
+						top: Math.round(new_top)
+					});
+					last_broadcast_time = now;
+				}
 			};
 			node_el.onpointerup = () => {
 				node_el.onpointermove = null;
 				node_el.onpointerup   = null;
-				// Save updated node positions after drag
+				// Save updated node positions after drag (full state with DB save)
 				this._auto_save_layout();
 			};
 		});
@@ -794,7 +936,13 @@ frappe.views.excel.JoinCanvas = class JoinCanvas {
 		if (!this._wire) return;
 		const src    = this._get_port_pos(this._wire.src_node_id, this._wire.src_field, "out");
 		const rect   = this.$stage[0].getBoundingClientRect();
-		const cursor = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+		// Convert screen cursor to local (pre-transform) coords to match src
+		const screen_x = e.clientX - rect.left;
+		const screen_y = e.clientY - rect.top;
+		const cursor = {
+			x: (screen_x - this._pan_x) / this._zoom,
+			y: (screen_y - this._pan_y) / this._zoom,
+		};
 		if (src) this._wire.path_el.setAttribute("d", this._bezier(src, cursor));
 	}
 
@@ -880,7 +1028,8 @@ frappe.views.excel.JoinCanvas = class JoinCanvas {
 					// Mark connected ports as green
 					this._mark_ports_connected(edge);
 					// Persist layout so refresh restores this canvas state
-					this._auto_save_layout();
+					// But skip if edge was restored from saved config (prevents infinite broadcast loop)
+					if (!edge._restored) this._auto_save_layout();
 				} else if (res.method === "type_mismatch") {
 					// V2.4.5 — type incompatibility: instant red alert + immediate removal
 					frappe.show_alert({ message: res.message, indicator: "red" }, 5);
@@ -900,19 +1049,32 @@ frappe.views.excel.JoinCanvas = class JoinCanvas {
 	_mark_ports_connected(edge) {
 		const src_node = this.nodes.get(edge.src_node_id);
 		const tgt_node = this.nodes.get(edge.tgt_node_id);
-		src_node?.el.querySelector(`[data-field="${edge.src_field}"] .ev-port--out`)
-			?.classList.add("ev-port--connected");
-		tgt_node?.el.querySelector(`[data-field="${edge.tgt_field}"] .ev-port--in`)
-			?.classList.add("ev-port--connected");
+		const src_field_el = src_node?.el.querySelector(`[data-field="${edge.src_field}"]`);
+		const tgt_field_el = tgt_node?.el.querySelector(`[data-field="${edge.tgt_field}"]`);
+		src_field_el?.querySelector('.ev-port--out')?.classList.add("ev-port--connected");
+		tgt_field_el?.querySelector('.ev-port--in')?.classList.add("ev-port--connected");
+		// Move connected fields to the top of their scroll container
+		src_field_el?.classList.add("ev-jc-field--pinned");
+		tgt_field_el?.classList.add("ev-jc-field--pinned");
+		if (src_field_el) {
+			const container = src_field_el.closest(".ev-jc-node-fields");
+			if (container) container.prepend(src_field_el);
+		}
+		if (tgt_field_el) {
+			const container = tgt_field_el.closest(".ev-jc-node-fields");
+			if (container) container.prepend(tgt_field_el);
+		}
 	}
 
 	_unmark_ports_connected(edge) {
 		const src_node = this.nodes.get(edge.src_node_id);
 		const tgt_node = this.nodes.get(edge.tgt_node_id);
-		src_node?.el.querySelector(`[data-field="${edge.src_field}"] .ev-port--out`)
-			?.classList.remove("ev-port--connected");
-		tgt_node?.el.querySelector(`[data-field="${edge.tgt_field}"] .ev-port--in`)
-			?.classList.remove("ev-port--connected");
+		const src_field_el = src_node?.el.querySelector(`[data-field="${edge.src_field}"]`);
+		const tgt_field_el = tgt_node?.el.querySelector(`[data-field="${edge.tgt_field}"]`);
+		src_field_el?.querySelector('.ev-port--out')?.classList.remove("ev-port--connected");
+		tgt_field_el?.querySelector('.ev-port--in')?.classList.remove("ev-port--connected");
+		src_field_el?.classList.remove("ev-jc-field--pinned");
+		tgt_field_el?.classList.remove("ev-jc-field--pinned");
 	}
 
 	_show_edge_badge(edge, res) {
@@ -922,6 +1084,7 @@ frappe.views.excel.JoinCanvas = class JoinCanvas {
 		const tgt = this._get_port_pos(edge.tgt_node_id, edge.tgt_field, "in");
 		if (!src || !tgt) return;
 
+		// Use local coords directly — badge lives in $nodes (transformed container)
 		const mid_x = (src.x + tgt.x) / 2;
 		const mid_y = (src.y + tgt.y) / 2;
 
@@ -963,7 +1126,7 @@ frappe.views.excel.JoinCanvas = class JoinCanvas {
 
 		badge.style.left = mid_x + "px";
 		badge.style.top  = (mid_y - 10) + "px";
-		this.$stage[0].appendChild(badge);
+		this.$nodes[0].appendChild(badge);
 		edge.badge_el = badge;
 	}
 
@@ -974,6 +1137,7 @@ frappe.views.excel.JoinCanvas = class JoinCanvas {
 		const tgt = this._get_port_pos(edge.tgt_node_id, edge.tgt_field, "in");
 		if (!src || !tgt) return;
 
+		// Use local coords directly — badge lives in $nodes (transformed container)
 		const mid_x = (src.x + tgt.x) / 2;
 		const mid_y = (src.y + tgt.y) / 2;
 
@@ -982,7 +1146,7 @@ frappe.views.excel.JoinCanvas = class JoinCanvas {
 		badge.textContent = message || __("No match found");
 		badge.style.left = mid_x + "px";
 		badge.style.top  = (mid_y - 10) + "px";
-		this.$stage[0].appendChild(badge);
+		this.$nodes[0].appendChild(badge);
 		edge.badge_el = badge;
 	}
 
@@ -1008,7 +1172,7 @@ frappe.views.excel.JoinCanvas = class JoinCanvas {
 				edge.path_el.style.strokeDasharray = "5,4";
 			}
 
-			// Reposition confidence badge when nodes are dragged
+			// Reposition badge — badge is in $nodes (transformed container), use local coords
 			if (edge.badge_el) {
 				const mid_x = (src.x + tgt.x) / 2;
 				const mid_y = (src.y + tgt.y) / 2;
@@ -1023,7 +1187,7 @@ frappe.views.excel.JoinCanvas = class JoinCanvas {
 		path.setAttribute("class", class_name);
 		path.style.fill        = "none";
 		path.style.strokeWidth = "2";
-		this.$svg.appendChild(path);
+		this.$svg[0].appendChild(path);
 		return path;
 	}
 
@@ -1037,9 +1201,13 @@ frappe.views.excel.JoinCanvas = class JoinCanvas {
 
 		const stage_rect = this.$stage[0].getBoundingClientRect();
 		const r          = port_el.getBoundingClientRect();
+		// Screen coords relative to stage
+		const screen_x = r.left + r.width  / 2 - stage_rect.left;
+		const screen_y = r.top  + r.height / 2 - stage_rect.top;
+		// Convert to local (pre-transform) coords for SVG paths
 		return {
-			x: r.left + r.width  / 2 - stage_rect.left,
-			y: r.top  + r.height / 2 - stage_rect.top,
+			x: (screen_x - this._pan_x) / this._zoom,
+			y: (screen_y - this._pan_y) / this._zoom,
 		};
 	}
 
@@ -1355,24 +1523,86 @@ frappe.views.excel.JoinCanvas = class JoinCanvas {
 	}
 
 	/**
+	 * Phase 4: Save canvas state to Canvas Session (collaborative).
+	 * Broadcasts changes to all users in the session in real-time.
+	 */
+	_save_to_session() {
+		// CRITICAL FIX: Prevent infinite loop
+		// Don't save/broadcast if we're currently applying remote state
+		if (this._applying_remote_state) {
+			return;
+		}
+
+		if (!this.active_session_id) {
+			console.warn('⚠️ No active session - cannot save to session');
+			return;
+		}
+
+		// Get current canvas state (nodes, edges, positions)
+		const canvas_state = this._get_canvas_state();
+		const timestamp = Date.now();
+
+		// Save to backend + broadcast to other users
+		frappe.call({
+			method: 'excel_view.excel_view.doctype.canvas_session.canvas_session.update_canvas_state',
+			args: {
+				session_id: this.active_session_id,
+				canvas_state: canvas_state,
+				timestamp: timestamp
+			},
+			callback: (r) => {
+				if (r.message && r.message.success) {
+					// Update local timestamp for conflict resolution
+					this._last_save_timestamp = r.message.timestamp || timestamp;
+				}
+			},
+			error: (err) => {
+				console.error('❌ Failed to save canvas state:', err);
+				frappe.show_alert({
+					message: __('Failed to save canvas changes'),
+					indicator: 'red'
+				});
+			}
+		});
+	}
+
+	/**
 	 * Auto-save canvas layout to user_settings without requiring Apply.
 	 * Called after every structural change (valid edge, node remove, node drag).
 	 * Preserves nodes + positions + aggregate/transform config so refresh
 	 * restores the exact canvas the user last worked on.
 	 */
 	_auto_save_layout() {
+		// CRITICAL FIX: Prevent auto-save during remote state application
+		// This prevents infinite loop when restoring edges triggers save
+		if (this._applying_remote_state) {
+			return;
+		}
+
 		const has_non_base = [...this.nodes.values()]
 			.some(n => n.doctype !== this.board.doctype);
+
 		if (has_non_base) {
-			// Save current canvas (nodes + positions + edges + agg/transform config)
-			this._save_to_user_settings(this.get_join_config());
+			// Phase 4: If in a canvas session, save to session (collaborative)
+			// Otherwise, save to user_settings (personal, backwards compatible)
+			if (this.active_session_id) {
+				this._save_to_session();
+			} else {
+				this._save_to_user_settings(this.get_join_config());
+			}
 		} else {
-			// All non-base nodes removed — explicitly clear so refresh starts clean
-			frappe.model.user_settings.save(
-				this.board.doctype,
-				"excel_join_config",
-				null,
-			);
+			// All non-base nodes removed — explicitly clear
+			if (this.active_session_id) {
+				// Clear session canvas state
+				this._save_to_session();
+			} else {
+				// Clear user_settings
+				frappe.model.user_settings.save(
+					this.board.doctype,
+					"excel_join_config",
+					null,
+				);
+			}
 		}
 	}
 
@@ -1407,11 +1637,11 @@ frappe.views.excel.JoinCanvas = class JoinCanvas {
 		const cfg_base    = (cfg.nodes || []).find(n => n.doctype === this.board.doctype);
 		if (base_canvas && cfg_base) {
 			node_id_map[cfg_base.id] = base_canvas.id;
-			// Restore saved position
-			const pos = cfg.node_positions?.[cfg_base.id];
+			// Restore saved position (support both formats: node_positions map and inline position)
+			const pos = cfg.node_positions?.[cfg_base.id] || cfg_base.position;
 			if (pos) {
-				base_canvas.el.style.left = pos.x + "px";
-				base_canvas.el.style.top  = pos.y + "px";
+				base_canvas.el.style.left = (pos.x ?? pos.left ?? 0) + "px";
+				base_canvas.el.style.top  = (pos.y ?? pos.top ?? 0) + "px";
 			}
 			// Restore base node selected_fields (checkboxes)
 			if (cfg.base_selected_fields?.length) {
@@ -1453,6 +1683,7 @@ frappe.views.excel.JoinCanvas = class JoinCanvas {
 					path_el,
 					badge_el:    null,
 					_remove_timer: null,
+					_restored:   true,  // Flag: restored from config, skip auto-save on validate
 				};
 				this.edges.push(new_edge);
 				// Re-validate: data may have changed since last session
@@ -1466,13 +1697,13 @@ frappe.views.excel.JoinCanvas = class JoinCanvas {
 				const new_id = this._add_node(cfg_node.doctype, { base: false });
 				node_id_map[cfg_node.id] = new_id;
 
-				// Restore position
-				const pos = cfg.node_positions?.[cfg_node.id];
+				// Restore position (support both formats: node_positions map and inline position)
+				const pos = cfg.node_positions?.[cfg_node.id] || cfg_node.position;
 				if (pos) {
 					const node_el = this.nodes.get(new_id)?.el;
 					if (node_el) {
-						node_el.style.left = pos.x + "px";
-						node_el.style.top  = pos.y + "px";
+						node_el.style.left = (pos.x ?? pos.left ?? 0) + "px";
+						node_el.style.top  = (pos.y ?? pos.top ?? 0) + "px";
 					}
 				}
 
@@ -1539,6 +1770,13 @@ frappe.views.excel.JoinCanvas = class JoinCanvas {
 			this.$overlay.find(".ev-jc-ai-btn").removeClass("ev-jc-btn--active");
 			return;
 		}
+
+		// Sidebar management: Close other sidebars/drawers when opening AI drawer
+		this.$stage.find(".ev-jc-genbi-chat").remove();
+		if (this.collab_sidebar_vue) {
+			this.collab_sidebar_vue.hide();
+		}
+
 		this._fetch_and_render_suggestions(false);
 	}
 
@@ -1573,14 +1811,16 @@ frappe.views.excel.JoinCanvas = class JoinCanvas {
 		const added = new Set([...this.nodes.values()].map(n => n.doctype));
 
 		const make_card = (s) => {
-			const pct         = Math.round(s.score * 100);
-			const is_meta     = s.method === "meta";
-			const is_ct       = s.method === "child_table";
-			const is_added    = added.has(s.doctype);
-			const via         = s.src_field !== "name"
+			const pct              = Math.round(s.score * 100);
+			const is_child_parent  = s.method === "child_parent";
+			const is_meta          = s.method === "meta";
+			const is_ct            = s.method === "child_table";
+			const is_added         = added.has(s.doctype);
+			const via              = s.src_field !== "name"
 				? `${s.src_field} → ${s.tgt_field}`
 				: `via ${s.tgt_field}`;
-			const stripe_cls  = is_ct ? "child_table" : (is_meta ? "meta" : "ml");
+			// child_parent uses same color as meta (both are high-confidence relationships)
+			const stripe_cls  = is_ct ? "child_table" : ((is_meta || is_child_parent) ? "meta" : "ml");
 			return `
 				<div class="ev-jc-ai-card${is_added ? " ev-jc-card--added" : ""}"
 				     data-doctype="${frappe.utils.escape_html(s.doctype)}">
@@ -1596,7 +1836,7 @@ frappe.views.excel.JoinCanvas = class JoinCanvas {
 							${frappe.utils.escape_html(via)}
 						</div>
 						<div class="ev-jc-card-bar-wrap">
-							<div class="ev-jc-card-bar${is_meta || is_ct ? "" : " ev-jc-card-bar--ml"}"
+							<div class="ev-jc-card-bar${is_meta || is_child_parent || is_ct ? "" : " ev-jc-card-bar--ml"}"
 							     style="width:${pct}%"></div>
 						</div>
 					</div>
@@ -1609,13 +1849,15 @@ frappe.views.excel.JoinCanvas = class JoinCanvas {
 				</div>`;
 		};
 
-		const meta_count  = suggestions.filter(s => s.method === "meta").length;
-		const ct_count    = suggestions.filter(s => s.method === "child_table").length;
-		const ml_count    = suggestions.filter(s => s.method === "ml").length;
+		const child_parent_count = suggestions.filter(s => s.method === "child_parent").length;
+		const meta_count         = suggestions.filter(s => s.method === "meta").length;
+		const ct_count           = suggestions.filter(s => s.method === "child_table").length;
+		const ml_count           = suggestions.filter(s => s.method === "ml").length;
 		const count_label = [
-			meta_count ? `${meta_count} Link` : "",
-			ct_count   ? `${ct_count} CT`     : "",
-			ml_count   ? `${ml_count} ML`     : "",
+			child_parent_count ? `${child_parent_count} Parent` : "",
+			meta_count         ? `${meta_count} Link`           : "",
+			ct_count           ? `${ct_count} CT`               : "",
+			ml_count           ? `${ml_count} ML`               : "",
 		].filter(Boolean).join(" · ") || "0";
 		const for_dt      = this._get_ai_doctype();
 
@@ -2079,5 +2321,1624 @@ frappe.views.excel.JoinCanvas = class JoinCanvas {
 			</table>
 		`);
 		d.show();
+	}
+
+	// ── V2.5+ — Generative BI: Chat UI (NL Query → Options → Auto-Canvas) ────
+
+	/**
+	 * Open chat-style drawer for Generative BI.
+	 * Modern chat interface:
+	 *   1. User types query → appears as user bubble
+	 *   2. Options appear as clickable cards (shortest → longest)
+	 *   3. Click card → auto-build canvas
+	 *   4. Chat history preserved
+	 */
+	_prompt_generative_query() {
+		// Remove existing chat drawer if open
+		this.$stage.find(".ev-jc-genbi-chat").remove();
+
+		// Sidebar management: Close other sidebars/drawers when opening Generate drawer
+		this.$stage.find(".ev-jc-ai-drawer").remove();
+		this.$overlay.find(".ev-jc-ai-btn").removeClass("ev-jc-btn--active");
+		if (this.collab_sidebar_vue) {
+			this.collab_sidebar_vue.hide();
+		}
+
+		const drawer = document.createElement("div");
+		drawer.className = "ev-jc-genbi-chat";
+		drawer.innerHTML = `
+			<div class="ev-jc-chat-header">
+				<div class="ev-jc-chat-header-content">
+					<svg width="20" height="20" viewBox="0 0 24 24" fill="none" style="margin-right:8px">
+						<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+						<circle cx="9" cy="10" r="1" fill="currentColor"/>
+						<circle cx="12" cy="10" r="1" fill="currentColor"/>
+						<circle cx="15" cy="10" r="1" fill="currentColor"/>
+					</svg>
+					<span class="ev-jc-chat-title">${__("Generative BI")}</span>
+				</div>
+				<button class="ev-jc-chat-close">
+					<svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+						<path d="M18 6L6 18M6 6l12 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+					</svg>
+				</button>
+			</div>
+			<div class="ev-jc-chat-messages">
+				<div class="ev-jc-chat-bubble ev-jc-chat-bubble--system">
+					<div class="ev-jc-chat-welcome">
+						${__("From <strong>{0}</strong>, where do you want to connect?", [frappe.utils.escape_html(this.board.doctype)])}
+					</div>
+					<div class="ev-jc-chat-examples">
+						<div class="ev-jc-example-label">${__("Try asking:")}</div>
+						<div class="ev-jc-example-chips">
+							<button class="ev-jc-example-chip" data-query="to projects">
+								<svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+									<path d="M9 11l3 3L22 4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+									<path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+								</svg>
+								"to projects"
+							</button>
+							<button class="ev-jc-example-chip" data-query="to timesheet">
+								<svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+									<circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
+									<path d="M12 6v6l4 2" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+								</svg>
+								"to timesheet"
+							</button>
+							<button class="ev-jc-example-chip" data-query="to salary slip">
+								<svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+									<path d="M12 2v20M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+								</svg>
+								"to salary slip"
+							</button>
+						</div>
+					</div>
+				</div>
+			</div>
+			<div class="ev-jc-chat-input-wrapper">
+				<input type="text" class="ev-jc-chat-input form-control"
+				       placeholder="${__('Describe what you want to connect...')}"
+				       autocomplete="off">
+				<button class="btn btn-primary btn-sm ev-jc-chat-send">
+					<svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+						<path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+					</svg>
+					<span>${__("Send")}</span>
+				</button>
+			</div>
+		`;
+		this.$stage[0].appendChild(drawer);
+
+		const $messages = $(drawer).find(".ev-jc-chat-messages");
+		const $input = $(drawer).find(".ev-jc-chat-input");
+		const $send = $(drawer).find(".ev-jc-chat-send");
+
+		// Close button
+		$(drawer).find(".ev-jc-chat-close").on("click", () => drawer.remove());
+
+		// Example chip click handlers
+		$(drawer).find(".ev-jc-example-chip").on("click", function() {
+			const query = $(this).data("query");
+			$input.val(query);
+			send_query();
+		});
+
+		// Get or create session ID for conversation continuity
+		let session_id = localStorage.getItem("genbi_session_id");
+		if (!session_id) {
+			session_id = `genbi_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+			localStorage.setItem("genbi_session_id", session_id);
+		}
+
+		// Send query handler
+		const send_query = () => {
+			const query = $input.val().trim();
+			if (query.length < 2) {
+				frappe.show_alert({
+					message:   __("Query too short — try asking something like 'to customer'"),
+					indicator: "orange",
+				});
+				return;
+			}
+
+			// Add user message bubble
+			$messages.append(`
+				<div class="ev-jc-chat-bubble ev-jc-chat-bubble--user">
+					${frappe.utils.escape_html(query)}
+				</div>
+			`);
+
+			// Add animated thinking indicator in chat
+			$messages.append(`
+				<div class="ev-jc-chat-bubble ev-jc-chat-bubble--system ev-jc-thinking">
+					<div class="ev-jc-thinking-dots">
+						<div class="ev-jc-dot"></div>
+						<div class="ev-jc-dot"></div>
+						<div class="ev-jc-dot"></div>
+					</div>
+					<span class="ev-jc-thinking-text">${__("Understanding your query...")}</span>
+				</div>
+			`);
+
+			$input.val("").prop("disabled", true);
+			$send.prop("disabled", true);
+
+			// Scroll to bottom
+			$messages[0].scrollTop = $messages[0].scrollHeight;
+
+			// Call new GenBI chat endpoint
+			frappe.call({
+				method: "excel_view.api.genbi_chat",
+				args:   {
+					query: query,
+					session_id: session_id,
+					base_doctype: this.board.doctype
+				},
+				callback: (r) => {
+					// Remove thinking indicator
+					$messages.find(".ev-jc-thinking").remove();
+
+					$input.prop("disabled", false);
+					$send.prop("disabled", false);
+
+					if (!r.message) {
+						$messages.append(`
+							<div class="ev-jc-chat-bubble ev-jc-chat-bubble--system ev-jc-chat-bubble--error">
+								${__("Failed to analyze query. Try rephrasing!")}
+							</div>
+						`);
+						$messages[0].scrollTop = $messages[0].scrollHeight;
+						return;
+					}
+
+					const result = r.message;
+					const response = result.response;
+					const intent = result.intent;
+
+					// Handle disambiguation
+					if (result.needs_disambiguation && result.disambiguation_options) {
+						this._show_disambiguation($messages, result.disambiguation_options, $input);
+						$messages[0].scrollTop = $messages[0].scrollHeight;
+						return;
+					}
+
+					// Route by response type
+					switch (response.type) {
+						case "text":
+							this._render_text_response($messages, response);
+							break;
+
+						case "paths":
+							this._render_paths_response($messages, response, drawer);
+							break;
+
+						case "explanation":
+							this._render_explanation_response($messages, response);
+							break;
+
+						case "data_insight":
+							this._render_data_insight_response($messages, response);
+							break;
+
+						case "canvas_config":
+							this._render_canvas_config_response($messages, response, drawer);
+							break;
+
+						default:
+							$messages.append(`
+								<div class="ev-jc-chat-bubble ev-jc-chat-bubble--system">
+									${frappe.utils.escape_html(JSON.stringify(response.content))}
+								</div>
+							`);
+					}
+
+					// Add follow-up suggestion pills
+					if (response.followup_suggestions && response.followup_suggestions.length > 0) {
+						this._add_followup_pills($messages, response.followup_suggestions, $input);
+					}
+
+					$messages[0].scrollTop = $messages[0].scrollHeight;
+				},
+				error: () => {
+					// Remove thinking indicator
+					$messages.find(".ev-jc-thinking").remove();
+
+					$input.prop("disabled", false);
+					$send.prop("disabled", false);
+					$messages.append(`
+						<div class="ev-jc-chat-bubble ev-jc-chat-bubble--system ev-jc-chat-bubble--error">
+							${__("Generation failed. Check console for details.")}
+						</div>
+					`);
+					$messages[0].scrollTop = $messages[0].scrollHeight;
+				},
+			});
+		};
+
+		$send.on("click", send_query);
+		$input.on("keypress", (e) => {
+			if (e.key === "Enter") send_query();
+		});
+
+		// Auto-focus input
+		setTimeout(() => $input.focus(), 100);
+	}
+
+	/**
+	 * Show disambiguation options when multiple entities match
+	 */
+	_show_disambiguation($messages, options, $input) {
+		const $bubble = $(`
+			<div class="ev-jc-chat-bubble ev-jc-chat-bubble--system">
+				<div style="margin-bottom:12px">
+					<strong>${__("Which DocType did you mean?")}</strong>
+				</div>
+				<div class="ev-jc-disambig-buttons"></div>
+			</div>
+		`);
+
+		const $buttons = $bubble.find(".ev-jc-disambig-buttons");
+
+		options.forEach(doctype => {
+			const $btn = $(`
+				<button class="btn btn-sm btn-default ev-jc-disambig-btn">
+					${frappe.utils.escape_html(doctype)}
+				</button>
+			`);
+			$btn.on("click", () => {
+				$input.val(`to ${doctype}`).trigger("keypress");
+			});
+			$buttons.append($btn);
+		});
+
+		$messages.append($bubble);
+	}
+
+	/**
+	 * Render simple text response
+	 */
+	_render_text_response($messages, response) {
+		$messages.append(`
+			<div class="ev-jc-chat-bubble ev-jc-chat-bubble--system">
+				${response.content}
+			</div>
+		`);
+	}
+
+	/**
+	 * Render paths response with data insights
+	 */
+	_render_paths_response($messages, response, drawer) {
+		const content = response.content;
+		const paths = content.paths || [];
+
+		if (paths.length === 0) {
+			$messages.append(`
+				<div class="ev-jc-chat-bubble ev-jc-chat-bubble--system ev-jc-chat-bubble--error">
+					${__("No paths found from {0} to {1}", [content.base_doctype, content.target_doctype])}
+				</div>
+			`);
+			return;
+		}
+
+		// Show results header
+		const header_msg = content.total > content.showing
+			? __("Found {0} paths, showing top {1} with data insights", [content.total, content.showing])
+			: __("Found {0} connection paths", [content.total]);
+
+		$messages.append(`
+			<div class="ev-jc-chat-bubble ev-jc-chat-bubble--system ev-jc-results-header">
+				<div class="ev-jc-results-icon">✨</div>
+				<div>
+					<strong>${header_msg}</strong>
+					<div style="font-size:11px;opacity:0.8;margin-top:2px">
+						${frappe.utils.escape_html(content.base_doctype)} → ${frappe.utils.escape_html(content.target_doctype)}
+					</div>
+				</div>
+			</div>
+		`);
+
+		// Show paths (top 10)
+		const BATCH_SIZE = 5;
+		let displayed_count = 0;
+
+		const show_more_options = () => {
+			const next_batch = paths.slice(displayed_count, displayed_count + BATCH_SIZE);
+
+			next_batch.forEach((opt, batch_idx) => {
+				const idx = displayed_count + batch_idx;
+				const conf_pct = Math.round(opt.confidence * 100);
+				const conf_color = conf_pct >= 80 ? "#4CAF50" : conf_pct >= 60 ? "#FF9800" : "#757575";
+				const path_str = opt.path.join(" → ");
+				const hop_count = opt.path.length - 1;
+				const hop_label = hop_count === 1 ? __("Direct") : __("{0} hops", [hop_count]);
+
+				// Data insights badge
+				const data_insights = opt.data_insights || {};
+				const has_data = data_insights.has_data;
+				const data_badge = has_data
+					? `<span class="ev-jc-data-badge ev-jc-data-badge--good">✓ Has data</span>`
+					: `<span class="ev-jc-data-badge ev-jc-data-badge--warn">⚠ Empty tables</span>`;
+
+				const path_icon = hop_count === 1
+					? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M5 12h14M12 5l7 7-7 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+					: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M5 12h4m6 0h4M9 5l3 7-3 7M15 5l3 7-3 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+				const card = $(`
+					<div class="ev-jc-chat-option-card" data-option-idx="${idx}" style="opacity: 0">
+						<div class="ev-jc-card-header">
+							<div class="ev-jc-card-icon">${path_icon}</div>
+							<div class="ev-jc-card-content">
+								<div class="ev-jc-card-title">${frappe.utils.escape_html(path_str)}</div>
+								<div class="ev-jc-card-meta">
+									<span class="ev-jc-meta-item">
+										<svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+											<path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+										</svg>
+										${hop_label}
+									</span>
+									<span class="ev-jc-meta-item">
+										<svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+											<rect x="3" y="3" width="18" height="18" rx="2" stroke="currentColor" stroke-width="2"/>
+											<path d="M8 10h8M8 14h5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+										</svg>
+										${opt.estimated_fields} fields
+									</span>
+									${data_badge}
+								</div>
+							</div>
+							<span class="ev-jc-confidence-badge" style="background:${conf_color}">${conf_pct}%</span>
+						</div>
+					</div>
+				`);
+
+				// Click to build
+				card.on("click", () => {
+					$messages.find(".ev-jc-chat-option-card").css("opacity", "0.5").css("pointer-events", "none");
+					$messages.append(`
+						<div class="ev-jc-chat-bubble ev-jc-chat-bubble--system">
+							⏳ ${__("Building canvas...")}
+						</div>
+					`);
+					$messages[0].scrollTop = $messages[0].scrollHeight;
+					this._build_canvas_from_selected_option_chat(opt, $messages, drawer);
+				});
+
+				$messages.append(card);
+
+				setTimeout(() => {
+					card.css({ opacity: 1, transform: "translateY(0)", transition: "all 0.4s ease" });
+				}, batch_idx * 80);
+			});
+
+			displayed_count += next_batch.length;
+
+			if (displayed_count < paths.length) {
+				const remaining = paths.length - displayed_count;
+				const show_more_btn = $(`
+					<div class="ev-jc-chat-show-more" style="text-align:center;margin:12px 0">
+						<button class="btn btn-sm btn-default">
+							${__("Show More")} (${remaining} ${__("remaining")})
+						</button>
+					</div>
+				`);
+				show_more_btn.on("click", () => {
+					show_more_btn.remove();
+					show_more_options();
+					setTimeout(() => {
+						$messages[0].scrollTop = $messages[0].scrollHeight;
+					}, 50);
+				});
+				$messages.append(show_more_btn);
+			}
+
+			$messages[0].scrollTop = $messages[0].scrollHeight;
+		};
+
+		show_more_options();
+	}
+
+	/**
+	 * Render relationship explanation
+	 */
+	_render_explanation_response($messages, response) {
+		const content = response.content;
+		const explanation = content.explanation;
+		const path_str = content.path.join(" → ");
+
+		const $bubble = $(`
+			<div class="ev-jc-chat-bubble ev-jc-chat-bubble--system ev-jc-explanation">
+				<div class="ev-jc-explanation-header">
+					<svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+						<circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
+						<path d="M12 16v-4M12 8h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+					</svg>
+					<strong>${__("Relationship Explanation")}</strong>
+				</div>
+				<div class="ev-jc-explanation-path">
+					${frappe.utils.escape_html(path_str)}
+				</div>
+				<div class="ev-jc-explanation-summary">
+					${explanation.summary}
+				</div>
+				<div class="ev-jc-explanation-steps">
+					<strong>${__("How they connect:")}</strong>
+					<ol>
+						${explanation.steps.map(step => `<li>${step}</li>`).join("")}
+					</ol>
+				</div>
+				${explanation.business_context ? `
+					<div class="ev-jc-explanation-context">
+						<strong>💡 Business Context:</strong> ${explanation.business_context}
+					</div>
+				` : ""}
+				<div class="ev-jc-explanation-confidence">
+					<small><strong>${__("Confidence:")}</strong> ${explanation.confidence_reasoning}</small>
+				</div>
+				${content.comparison ? `
+					<div class="ev-jc-explanation-comparison">
+						<small>${content.comparison}</small>
+					</div>
+				` : ""}
+			</div>
+		`);
+
+		$messages.append($bubble);
+	}
+
+	/**
+	 * Render data insight
+	 */
+	_render_data_insight_response($messages, response) {
+		const content = response.content;
+		const doctype = content.doctype;
+		const row_count = content.row_count;
+		const filters = content.suggested_filters || [];
+
+		$messages.append(`
+			<div class="ev-jc-chat-bubble ev-jc-chat-bubble--system ev-jc-data-insight">
+				<div class="ev-jc-insight-header">
+					<svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+						<path d="M3 3v18h18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+						<path d="M18 17l-5-5-4 4-6-6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+					</svg>
+					<strong>${__("Data Insights")}</strong>
+				</div>
+				<div class="ev-jc-insight-content">
+					<div class="ev-jc-insight-row-count">
+						<strong>${frappe.utils.escape_html(doctype)}</strong> has <strong>${row_count.toLocaleString()}</strong> rows
+					</div>
+					${filters.length > 0 ? `
+						<div class="ev-jc-insight-filters">
+							<small><strong>${__("Suggested filters:")}</strong></small>
+							<div>${filters.map(f => f.label).join(", ")}</div>
+						</div>
+					` : ""}
+				</div>
+			</div>
+		`);
+	}
+
+	/**
+	 * Render auto-built canvas config
+	 */
+	_render_canvas_config_response($messages, response, drawer) {
+		const content = response.content;
+		const canvas = content.canvas;
+
+		$messages.append(`
+			<div class="ev-jc-chat-bubble ev-jc-chat-bubble--system">
+				✅ ${__("Canvas auto-built! Building now...")}
+			</div>
+		`);
+
+		// Close drawer and build canvas
+		setTimeout(() => {
+			drawer.remove();
+			this._apply_auto_built_canvas(canvas);
+		}, 500);
+	}
+
+	/**
+	 * Add follow-up suggestion pills
+	 */
+	_add_followup_pills($messages, suggestions, $input) {
+		if (suggestions.length === 0) return;
+
+		const $pills = $(`
+			<div class="ev-jc-followup-pills">
+				<div class="ev-jc-pills-label">${__("Try:")}</div>
+				<div class="ev-jc-pills-container"></div>
+			</div>
+		`);
+
+		const $container = $pills.find(".ev-jc-pills-container");
+
+		suggestions.forEach(suggestion => {
+			const $pill = $(`
+				<button class="ev-jc-followup-pill">
+					${frappe.utils.escape_html(suggestion)}
+				</button>
+			`);
+			$pill.on("click", () => {
+				$input.val(suggestion);
+				$input.focus();
+				// Auto-submit
+				setTimeout(() => {
+					$input.trigger($.Event("keypress", { key: "Enter" }));
+				}, 100);
+			});
+			$container.append($pill);
+		});
+
+		$messages.append($pills);
+	}
+
+	/**
+	 * Apply auto-built canvas from query parser
+	 */
+	_apply_auto_built_canvas(canvas_config) {
+		// Use existing canvas building logic
+		const nodes = canvas_config.nodes || [];
+		const edges = canvas_config.edges || [];
+
+		nodes.forEach(node_config => {
+			this._add_doctype_node(node_config.doctype, node_config.x, node_config.y, node_config.id);
+		});
+
+		edges.forEach(edge_config => {
+			this._add_edge(edge_config);
+		});
+
+		this.save_state_debounced();
+	}
+
+	/**
+	 * Build canvas from selected option (chat UI version).
+	 * @param {Object} option - Selected option from generate_canvas_options
+	 * @param {jQuery} $messages - Chat messages container
+	 * @param {HTMLElement} drawer - Chat drawer element
+	 */
+	_build_canvas_from_selected_option_chat(option, $messages, drawer) {
+		frappe.call({
+			method: "excel_view.api.build_canvas_from_option",
+			args: {
+				option:        JSON.stringify(option),
+				base_doctype:  this.board.doctype,
+			},
+			callback: (r) => {
+				if (!r.message) {
+					$messages.append(`
+						<div class="ev-jc-chat-bubble ev-jc-chat-bubble--system ev-jc-chat-bubble--error">
+							${__("Failed to build canvas. Try another option!")}
+						</div>
+					`);
+					$messages[0].scrollTop = $messages[0].scrollHeight;
+					// Re-enable cards
+					$messages.find(".ev-jc-chat-option-card").css("opacity", "1").css("pointer-events", "auto");
+					return;
+				}
+
+				const config = r.message;
+
+				// Clear existing non-base nodes and edges
+				const base_node = [...this.nodes.values()].find(n => n.doctype === this.board.doctype);
+				this.nodes.forEach((node, id) => {
+					if (id !== base_node?.id) {
+						node.el?.remove();
+						this.nodes.delete(id);
+					}
+				});
+				this.edges.forEach(edge => {
+					edge.path_el?.remove();
+					edge.badge_el?.remove();
+				});
+				this.edges = [];
+
+				// Rebuild from config
+				const node_id_map = new Map();
+				node_id_map.set(config.base_doctype, base_node.id);
+
+				// Create all nodes first (skip base which already exists)
+				let loaded = 0;
+				const non_base_nodes = config.nodes.filter(n => n.doctype !== config.base_doctype);
+
+				const _wire_all = () => {
+					if (loaded < non_base_nodes.length) return;
+
+					// Position all nodes
+					config.nodes.forEach(node_cfg => {
+						const node_id = node_id_map.get(node_cfg.doctype);
+						if (!node_id) return;
+						const node = this.nodes.get(node_id);
+						if (node) {
+							node.el.style.left = `${node_cfg.x}px`;
+							node.el.style.top  = `${node_cfg.y}px`;
+						}
+					});
+
+					// Create edges
+					config.edges.forEach(edge_cfg => {
+						const src_node = config.nodes.find(n => n.id === edge_cfg.src_node_id);
+						const tgt_node = config.nodes.find(n => n.id === edge_cfg.tgt_node_id);
+						if (!src_node || !tgt_node) return;
+
+						const src_id = node_id_map.get(src_node.doctype);
+						const tgt_id = node_id_map.get(tgt_node.doctype);
+						if (!src_id || !tgt_id) return;
+
+						// Auto-check selected fields on target node
+						const tgt = this.nodes.get(tgt_id);
+						if (tgt && edge_cfg.selected_fields) {
+							edge_cfg.selected_fields.forEach(f => tgt.selected_fields.add(f));
+							// Refresh checkboxes to show selection
+							const fields_div = tgt.el.querySelector(".ev-jc-node-fields");
+							if (fields_div) {
+								this._add_field_checkboxes(tgt_id, fields_div, new Set(edge_cfg.selected_fields));
+							}
+						}
+
+						// Create edge
+						const path_el = this._create_svg_path("ev-jc-edge ev-jc-edge--pending");
+						const edge = {
+							id:            `edge_${this._edge_ctr++}`,
+							src_node_id:   src_id,
+							src_field:     edge_cfg.src_field,
+							tgt_node_id:   tgt_id,
+							tgt_field:     edge_cfg.tgt_field,
+							valid:         null,
+							confidence:    null,
+							method:        null,
+							path_el,
+							badge_el:      null,
+							_remove_timer: null,
+						};
+						this.edges.push(edge);
+						this._validate_edge(edge);
+					});
+
+					// Redraw all edges
+					this._render_edges();
+
+					// Success message in chat
+					$messages.append(`
+						<div class="ev-jc-chat-bubble ev-jc-chat-bubble--system ev-jc-chat-bubble--success">
+							✨ ${__("Canvas built successfully!")}
+							<br><span style="font-size:10px;opacity:0.8">${config.nodes.length} ${__("nodes")}, ${config.edges.length} ${__("joins")}</span>
+						</div>
+					`);
+					$messages[0].scrollTop = $messages[0].scrollHeight;
+
+					// Close drawer after 2 seconds
+					setTimeout(() => {
+						drawer.remove();
+						frappe.show_alert({
+							message:   __("✨ Canvas ready! Click Apply to load data."),
+							indicator: "green",
+						}, 5);
+					}, 2000);
+				};
+
+				if (!non_base_nodes.length) {
+					_wire_all();
+					return;
+				}
+
+				// Load non-base nodes
+				non_base_nodes.forEach(node_cfg => {
+					frappe.model.with_doctype(node_cfg.doctype, () => {
+						const new_id = this._add_node(node_cfg.doctype, { base: false });
+						node_id_map.set(node_cfg.doctype, new_id);
+						loaded++;
+						_wire_all();
+					});
+				});
+			},
+			error: () => {
+				$messages.append(`
+					<div class="ev-jc-chat-bubble ev-jc-chat-bubble--system ev-jc-chat-bubble--error">
+						${__("Canvas build failed. Check console for details.")}
+					</div>
+				`);
+				$messages[0].scrollTop = $messages[0].scrollHeight;
+				// Re-enable cards
+				$messages.find(".ev-jc-chat-option-card").css("opacity", "1").css("pointer-events", "auto");
+			},
+		});
+	}
+
+	// ══════════════════════════════════════════════════════════════════════════
+	// Figma-Style Zoom & Pan Methods
+	// ══════════════════════════════════════════════════════════════════════════
+
+	_zoom_in() {
+		const center_x = this.$stage.width() / 2;
+		const center_y = this.$stage.height() / 2;
+		this._zoom_at_point(center_x, center_y, Math.min(this._zoom + 0.2, 5.0));
+	}
+
+	_zoom_out() {
+		const center_x = this.$stage.width() / 2;
+		const center_y = this.$stage.height() / 2;
+		this._zoom_at_point(center_x, center_y, Math.max(this._zoom - 0.2, 0.1));
+	}
+
+	_zoom_fit() {
+		// Calculate bounds of all nodes
+		if (!this.nodes.size) {
+			this._zoom = 1.0;
+			this._pan_x = 0;
+			this._pan_y = 0;
+			this._apply_transform();
+			return;
+		}
+
+		let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+
+		this.nodes.forEach(node => {
+			const x = parseFloat(node.el.style.left) || 0;
+			const y = parseFloat(node.el.style.top) || 0;
+			const w = node.el.offsetWidth;
+			const h = node.el.offsetHeight;
+
+			minX = Math.min(minX, x);
+			minY = Math.min(minY, y);
+			maxX = Math.max(maxX, x + w);
+			maxY = Math.max(maxY, y + h);
+		});
+
+		const contentWidth = maxX - minX + 100;  // +100 for padding
+		const contentHeight = maxY - minY + 100;
+		const stageWidth = this.$stage.width();
+		const stageHeight = this.$stage.height();
+
+		const zoomX = stageWidth / contentWidth;
+		const zoomY = stageHeight / contentHeight;
+		const zoom = Math.min(zoomX, zoomY, 1.0);  // Don't zoom in beyond 100%
+
+		// Center the content
+		const offsetX = (stageWidth - contentWidth * zoom) / 2;
+		const offsetY = (stageHeight - contentHeight * zoom) / 2;
+
+		this._zoom = zoom;
+		this._pan_x = offsetX - (minX - 50) * zoom;
+		this._pan_y = offsetY - (minY - 50) * zoom;
+		this._apply_transform();
+	}
+
+	/**
+	 * Zoom centered on a specific point (Figma-style)
+	 * @param {number} x - Mouse X position relative to stage
+	 * @param {number} y - Mouse Y position relative to stage
+	 * @param {number} new_zoom - Target zoom level
+	 */
+	_zoom_at_point(x, y, new_zoom) {
+		// Clamp zoom level
+		new_zoom = Math.max(0.1, Math.min(5.0, new_zoom));
+
+		// Calculate world coordinates of the point before zoom
+		const world_x = (x - this._pan_x) / this._zoom;
+		const world_y = (y - this._pan_y) / this._zoom;
+
+		// Update zoom
+		this._zoom = new_zoom;
+
+		// Adjust pan to keep the same world point under the cursor
+		this._pan_x = x - world_x * this._zoom;
+		this._pan_y = y - world_y * this._zoom;
+
+		this._apply_transform();
+	}
+
+	_apply_transform() {
+		// Apply CSS transform to nodes container and SVG
+		const transform = `translate(${this._pan_x}px, ${this._pan_y}px) scale(${this._zoom})`;
+		this.$nodes.css("transform", transform);
+		this.$svg.css("transform", transform);
+
+		// Update zoom level display
+		const percent = Math.round(this._zoom * 100);
+		this.$overlay.find(".ev-jc-zoom-level").text(`${percent}%`);
+
+		// Update transform origin for smooth scaling
+		this.$nodes.css("transform-origin", "0 0");
+		this.$svg.css("transform-origin", "0 0");
+	}
+
+	_start_pan(e) {
+		this._is_panning = true;
+		const start_x = e.clientX;
+		const start_y = e.clientY;
+		const initial_pan_x = this._pan_x;
+		const initial_pan_y = this._pan_y;
+
+		this.$overlay.css("cursor", "grabbing");
+
+		const onMouseMove = (e) => {
+			if (!this._is_panning) return;
+
+			const dx = e.clientX - start_x;
+			const dy = e.clientY - start_y;
+
+			this._pan_x = initial_pan_x + dx;
+			this._pan_y = initial_pan_y + dy;
+			this._apply_transform();
+		};
+
+		const onMouseUp = () => {
+			this._is_panning = false;
+			this.$overlay.css("cursor", this._space_pressed ? "grab" : "");
+			$(document).off("mousemove", onMouseMove);
+			$(document).off("mouseup", onMouseUp);
+		};
+
+		$(document).on("mousemove", onMouseMove);
+		$(document).on("mouseup", onMouseUp);
+	}
+
+	// ── Collaboration Methods ─────────────────────────────────────────────────
+
+	_init_collaboration() {
+		// Initialize Vanilla JS collaboration sidebar
+		if (!this.collab_sidebar_vue) {
+			this.collab_sidebar_vue = new frappe.canvas.CollaborationSidebarVanilla({
+				parent: this.$overlay,
+				canvas: this
+			});
+		}
+
+		// Initialize modern collaboration dialog
+		if (!this.collab_dialog) {
+			this.collab_dialog = new frappe.canvas.CollaborationDialog({
+				canvas: this
+			});
+		}
+
+		// Check if current workbook has an existing session
+		this._check_existing_session();
+
+		// Setup Socket.IO event listeners
+		this._setup_realtime_events();
+	}
+
+	async _check_existing_session() {
+		// PRIORITY 1: Check URL hash for canvas session (for direct links/bookmarks)
+		// Using hash (#) instead of query param (?) to avoid Frappe filter conflicts
+		const hash = window.location.hash;
+		let session_id_from_url = hash.startsWith('#canvas:') ? hash.substring(8) : null;
+
+		// Strip any query parameters that might have been appended (e.g., ?status=Active)
+		if (session_id_from_url) {
+			session_id_from_url = session_id_from_url.split('?')[0].split('#')[0].trim();
+		}
+
+		if (session_id_from_url) {
+			// Validate session exists before joining
+			try {
+				const session_check = await frappe.call({
+					method: 'excel_view.excel_view.doctype.canvas_session.canvas_session.get_session',
+					args: { session_id: session_id_from_url }
+				});
+
+				if (session_check.message) {
+					// Session exists, auto-join after small delay
+					setTimeout(() => {
+						this._join_session(session_id_from_url);
+					}, 500);
+				}
+			} catch (e) {
+				console.error('❌ Session not found or no access:', e);
+				// Remove invalid session from URL hash
+				const clean_url = window.location.pathname + window.location.search;
+				history.replaceState(null, '', clean_url);
+
+				frappe.show_alert({
+					message: __('Canvas session not found or you don\'t have access'),
+					indicator: 'orange'
+				});
+			}
+			return;
+		}
+
+		// PRIORITY 2: Check if the current workbook has a linked canvas session
+		const workbook_name = this.board.workbook?.name;
+		if (!workbook_name) return;
+
+		try {
+			const workbook = await frappe.db.get_doc('Excel Workbook', workbook_name);
+			if (workbook.canvas_session_id) {
+				// Show resume banner
+				this._show_resume_banner(workbook.canvas_session_id, workbook.canvas_session_title);
+			}
+		} catch (e) {
+			console.error('Failed to check existing session:', e);
+		}
+	}
+
+	_show_resume_banner(session_id, session_title) {
+		// Show banner to resume the existing session
+		const banner = $(`
+			<div class="ev-jc-resume-banner">
+				<span>${__('Resume collaboration: {0}', [session_title || session_id])}</span>
+				<button class="btn btn-xs btn-primary resume-session-btn">
+					${__('Resume')}
+				</button>
+				<button class="btn btn-xs btn-default dismiss-banner-btn">
+					${__('Dismiss')}
+				</button>
+			</div>
+		`).prependTo(this.$stage);
+
+		banner.find('.resume-session-btn').on('click', () => {
+			this._join_session(session_id);
+			banner.remove();
+		});
+
+		banner.find('.dismiss-banner-btn').on('click', () => {
+			banner.remove();
+		});
+	}
+
+	_toggle_collaboration() {
+		if (this.active_session_id) {
+			// Already in a session, toggle sidebar visibility
+			if (this.collab_sidebar_vue) {
+				const isVisible = this.collab_sidebar_vue.$sidebar?.is(':visible');
+				if (isVisible) {
+					this.collab_sidebar_vue.hide();
+				} else {
+					// Sidebar management: Close other sidebars when showing collaborate sidebar
+					this.$stage.find(".ev-jc-ai-drawer").remove();
+					this.$stage.find(".ev-jc-genbi-chat").remove();
+					this.$overlay.find(".ev-jc-ai-btn").removeClass("ev-jc-btn--active");
+
+					this.collab_sidebar_vue.show();
+				}
+			}
+		} else {
+			// Not in a session, show modern collaboration dialog
+			if (this.collab_dialog) {
+				this.collab_dialog.show();
+			}
+		}
+	}
+
+	async _start_session(title) {
+		try {
+			// Create a new Canvas Session
+			const result = await frappe.call({
+				method: 'excel_view.excel_view.doctype.canvas_session.canvas_session.create_session',
+				args: {
+					title: title,
+					base_doctype: this.board.doctype,
+					canvas_state: this._get_canvas_state()
+				}
+			});
+
+			const session_id = result.message.session_id;
+			await this._join_session(session_id);
+
+			// Link to workbook if exists
+			if (this.board.workbook?.name) {
+				await frappe.db.set_value('Excel Workbook', this.board.workbook.name, {
+					canvas_session_id: session_id,
+					canvas_session_title: title
+				});
+			}
+
+			frappe.show_alert({
+				message: __('Collaboration session started'),
+				indicator: 'green'
+			});
+		} catch (e) {
+			frappe.show_alert({
+				message: __('Failed to start session: {0}', [e.message]),
+				indicator: 'red'
+			});
+			console.error('Failed to start session:', e);
+		}
+	}
+
+	async _join_session(session_id) {
+		try {
+			// Set active session FIRST
+			this.active_session_id = session_id;
+
+			// Join canvas session room using Frappe's built-in doc_subscribe
+			const doctype = 'Canvas Session';
+			const docname = session_id;
+			frappe.realtime.socket.emit('doc_subscribe', doctype, docname);
+
+			// Verify subscription by listening for ack
+			frappe.realtime.socket.once('doc_subscribe_ack', (data) => {
+				console.log('✅ Doc subscription confirmed:', data);
+			});
+
+			// Call Python to broadcast join event AND get online users list
+			const join_result = await frappe.call({
+				method: 'excel_view.excel_view.doctype.canvas_session.canvas_session.join_canvas_session',
+				args: { session_id: session_id }
+			});
+
+			// Extract online_users from join response
+			const online_users = join_result.message.online_users || [];
+
+			// Load session data
+			const result = await frappe.call({
+				method: 'excel_view.excel_view.doctype.canvas_session.canvas_session.get_session',
+				args: { session_id: session_id }
+			});
+
+			const session_data = result.message;
+
+			// CRITICAL: Clear existing canvas state before loading session
+			// Remove all non-base nodes and edges to prevent duplicates
+			const base_doctype = this.board.doctype;
+			const non_base_nodes = [...this.nodes.entries()]
+				.filter(([_, n]) => n.doctype !== base_doctype);
+
+			// Remove all edges first
+			this.edges.forEach(e => this._delete_edge(e));
+			this.edges = [];
+
+			// Remove all non-base nodes
+			for (const [node_id, node] of non_base_nodes) {
+				node.el.remove();
+				this.nodes.delete(node_id);
+			}
+
+			// Restore canvas state from session
+			// CRITICAL: Protect initial restore to prevent auto-save loop
+			if (session_data.canvas_state) {
+				this._applying_remote_state = true;
+				try {
+					this._restore_from_config(session_data.canvas_state);
+				} finally {
+					this._applying_remote_state = false;
+				}
+			}
+
+			// Show Vue sidebar with session data AND online users from join response
+			if (this.collab_sidebar_vue) {
+				// Sidebar management: Close other sidebars when opening collaborate sidebar
+				this.$stage.find(".ev-jc-ai-drawer").remove();
+				this.$stage.find(".ev-jc-genbi-chat").remove();
+				this.$overlay.find(".ev-jc-ai-btn").removeClass("ev-jc-btn--active");
+
+				this.collab_sidebar_vue.refresh(session_data, online_users);
+				this.collab_sidebar_vue.show();
+			}
+
+			// Update collaborate button appearance
+			this.$overlay.find('.ev-jc-collaborate-btn')
+				.removeClass('btn-default')
+				.addClass('btn-success')
+				.attr('title', __('Collaboration active - click to toggle sidebar'));
+
+			// Setup automatic leave detection
+			this._setup_leave_detection();
+
+			// Add session_id to URL hash for persistence and sharing
+			// Use replaceState to avoid Frappe router query parameter pollution
+			const clean_url = window.location.pathname + window.location.search + `#canvas:${session_id}`;
+			history.replaceState(null, '', clean_url);
+
+			frappe.show_alert({
+				message: __('Joined collaboration session'),
+				indicator: 'green'
+			});
+		} catch (e) {
+			frappe.show_alert({
+				message: __('Failed to join session: {0}', [e.message]),
+				indicator: 'red'
+			});
+			console.error('Failed to join session:', e);
+		}
+	}
+
+	_leave_session() {
+		if (!this.active_session_id) return;
+
+		const session_id = this.active_session_id;
+
+		// Leave canvas session room using Frappe's built-in doc_unsubscribe
+		frappe.realtime.socket.emit('doc_unsubscribe', 'Canvas Session', session_id);
+
+		// Call Python to broadcast leave event AND remove from cache
+		frappe.call({
+			method: 'excel_view.excel_view.doctype.canvas_session.canvas_session.leave_canvas_session',
+			args: { session_id: session_id },
+			async: false  // Synchronous for beforeunload
+		});
+
+		// Clear active session
+		this.active_session_id = null;
+		this.online_users = [];
+
+		// Remove session_id from URL hash
+		window.location.hash = '';
+
+		// Hide Vue sidebar
+		if (this.collab_sidebar_vue) {
+			this.collab_sidebar_vue.hide();
+		}
+
+		// Reset collaborate button
+		this.$overlay.find('.ev-jc-collaborate-btn')
+			.removeClass('btn-success')
+			.addClass('btn-default')
+			.attr('title', __('Start or join a collaborative canvas session'));
+
+		// Cleanup leave detection
+		this._cleanup_leave_detection();
+
+		frappe.show_alert({
+			message: __('Left collaboration session'),
+			indicator: 'orange'
+		});
+	}
+
+	_setup_leave_detection() {
+		if (!this.active_session_id) return;
+
+		// 1. Detect tab/window close
+		this._beforeunload_handler = () => {
+			if (this.active_session_id) {
+				// Use sendBeacon with FormData (works with Frappe API and not blocked by browsers)
+				const formData = new FormData();
+				formData.append('session_id', this.active_session_id);
+				formData.append('csrf_token', frappe.csrf_token);
+
+				navigator.sendBeacon(
+					'/api/method/excel_view.excel_view.doctype.canvas_session.canvas_session.leave_canvas_session',
+					formData
+				);
+			}
+		};
+		window.addEventListener('beforeunload', this._beforeunload_handler);
+
+		// 2. Detect socket disconnection
+		this._disconnect_handler = () => {
+			if (this.active_session_id) {
+				// Try to call leave (might not work if truly disconnected)
+				frappe.call({
+					method: 'excel_view.excel_view.doctype.canvas_session.canvas_session.leave_canvas_session',
+					args: { session_id: this.active_session_id }
+				});
+			}
+		};
+		frappe.realtime.socket.on('disconnect', this._disconnect_handler);
+
+		// 3. Detect page visibility change (tab switch)
+		this._visibility_handler = () => {
+			if (document.hidden && this.active_session_id) {
+				// User switched away - don't leave yet, just mark as inactive
+				// Could add a timeout here to leave after 5 minutes of inactivity
+			}
+		};
+		document.addEventListener('visibilitychange', this._visibility_handler);
+	}
+
+	_cleanup_leave_detection() {
+		// Remove all event listeners
+		if (this._beforeunload_handler) {
+			window.removeEventListener('beforeunload', this._beforeunload_handler);
+			this._beforeunload_handler = null;
+		}
+
+		if (this._disconnect_handler) {
+			frappe.realtime.socket.off('disconnect', this._disconnect_handler);
+			this._disconnect_handler = null;
+		}
+
+		if (this._visibility_handler) {
+			document.removeEventListener('visibilitychange', this._visibility_handler);
+			this._visibility_handler = null;
+		}
+	}
+
+	_setup_realtime_events() {
+		// Use Frappe's built-in realtime.on() - NO custom Socket.IO handlers!
+
+		// User joined event (published from Python)
+		frappe.realtime.on('canvas_user_joined', (data) => {
+			// FILTER: Only process if it's for our active session and not ourselves
+			if (data.session_id === this.active_session_id &&
+			    data.user !== frappe.session.user &&
+			    this.collab_sidebar) {
+				this.collab_sidebar.online_users.add_user(data);
+			}
+		});
+
+		// User left event (published from Python)
+		frappe.realtime.on('canvas_user_left', (data) => {
+			// FILTER: Only process if it's for our active session
+			if (data.session_id === this.active_session_id && this.collab_sidebar) {
+				this.collab_sidebar.online_users.remove_user(data);
+			}
+		});
+
+		// Chat message event (published from Python)
+		frappe.realtime.on('canvas_chat_message', (data) => {
+			// FILTER: Only process if it's for our active session
+			if (data.session_id === this.active_session_id && this.collab_sidebar) {
+				this.collab_sidebar.chat.add_message(data);
+			}
+		});
+
+		// Canvas state updated by another user (Phase 4)
+		frappe.realtime.on('canvas_updated', (data) => {
+			// Ignore self-updates (avoid echo)
+			if (data.user === frappe.session.user) return;
+
+			// Filter: only process if for our active session
+			if (data.session_id !== this.active_session_id) return;
+
+
+			// Apply remote canvas state
+			this._apply_remote_canvas_state(data.canvas_state, data.timestamp);
+
+			// Show brief notification
+			frappe.show_alert({
+				message: __('{0} updated the canvas', [frappe.user_info(data.user).fullname]),
+				indicator: 'blue'
+			}, 2);
+		});
+
+		// Live node position updates (Phase 4 - throttled from other users' drags)
+		frappe.realtime.on('canvas_node_moved', (data) => {
+			// Ignore self-updates
+			if (data.user === frappe.session.user) return;
+
+			// Filter: only for our active session
+			if (data.session_id !== this.active_session_id) return;
+
+			// Apply position update
+			const node = this.nodes.get(data.node_id);
+			if (node && node.el) {
+				node.el.style.left = data.position.left + 'px';
+				node.el.style.top = data.position.top + 'px';
+				this._render_edges(); // Update connected edges
+			}
+		});
+	}
+
+	_get_canvas_state() {
+		// Serialize current canvas state (nodes, edges, positions)
+		const nodes = [];
+		this.nodes.forEach((node, id) => {
+			nodes.push({
+				id: id,
+				doctype: node.doctype,
+				selected_fields: Array.from(node.selected_fields || []),
+				position: {
+					left: parseInt(node.el.style.left) || 0,
+					top: parseInt(node.el.style.top) || 0
+				}
+			});
+		});
+
+		const edges = this.edges.map(edge => ({
+			id: edge.id,
+			src_node_id: edge.src_node_id,
+			src_field: edge.src_field,
+			tgt_node_id: edge.tgt_node_id,
+			tgt_field: edge.tgt_field,
+			valid: edge.valid,
+			confidence: edge.confidence,
+			method: edge.method
+		}));
+
+		return {
+			nodes: nodes,
+			edges: edges,
+			zoom: this._zoom,
+			pan: { x: this._pan_x, y: this._pan_y }
+		};
+	}
+
+	_save_canvas_state_to_session() {
+		// Auto-save canvas state to the active session
+		if (!this.active_session_id) return;
+
+		const canvas_state = this._get_canvas_state();
+
+		frappe.call({
+			method: 'excel_view.excel_view.doctype.canvas_session.canvas_session.update_canvas_state',
+			args: {
+				session_id: this.active_session_id,
+				canvas_state: canvas_state
+			},
+			callback: (r) => {
+				if (r.message) {
+					// Broadcast update to other users
+					frappe.realtime.socket.emit('canvas_update', {
+						session_id: this.active_session_id,
+						canvas_state: canvas_state
+					});
+				}
+			}
+		});
+	}
+
+	/**
+	 * Phase 4: Apply remote canvas state from another user.
+	 * Detects whether this is a structural change (nodes/edges added/removed)
+	 * or just a position update, and handles accordingly.
+	 *
+	 * @param {Object} remote_state - Canvas state from remote user
+	 * @param {Number} remote_timestamp - Timestamp of remote change
+	 */
+	_apply_remote_canvas_state(remote_state, remote_timestamp) {
+		if (!remote_state || !remote_state.nodes) {
+			console.warn('⚠️ Invalid remote canvas state:', remote_state);
+			return;
+		}
+
+		// CRITICAL: Set flag to prevent ANY auto-save during sync
+		this._applying_remote_state = true;
+
+		try {
+			// Build local non-base doctype list (sorted for comparison)
+			const local_doctypes = [...this.nodes.values()]
+				.filter(n => n.doctype !== this.board.doctype)
+				.map(n => n.doctype)
+				.sort();
+
+			// Build remote non-base doctype list
+			const remote_non_base = (remote_state.nodes || [])
+				.filter(n => n.doctype !== this.board.doctype);
+			const remote_doctypes = remote_non_base.map(n => n.doctype).sort();
+
+			// Build local edge signature set
+			const local_edge_sigs = new Set(
+				this.edges.map(e => {
+					const src_dt = this.nodes.get(e.src_node_id)?.doctype;
+					const tgt_dt = this.nodes.get(e.tgt_node_id)?.doctype;
+					return `${src_dt}:${e.src_field}->${tgt_dt}:${e.tgt_field}`;
+				})
+			);
+
+			// Build remote edge signature set (use doctype from remote nodes map)
+			const remote_node_map = new Map();
+			(remote_state.nodes || []).forEach(n => remote_node_map.set(n.id, n));
+			const remote_edge_sigs = new Set(
+				(remote_state.edges || []).map(e => {
+					const src_dt = remote_node_map.get(e.src_node_id)?.doctype;
+					const tgt_dt = remote_node_map.get(e.tgt_node_id)?.doctype;
+					return `${src_dt}:${e.src_field}->${tgt_dt}:${e.tgt_field}`;
+				})
+			);
+
+			// Detect structural change
+			const doctypes_match = local_doctypes.join(',') === remote_doctypes.join(',');
+			const edges_match = local_edge_sigs.size === remote_edge_sigs.size &&
+				[...local_edge_sigs].every(s => remote_edge_sigs.has(s));
+			const is_structural_change = !doctypes_match || !edges_match;
+
+			if (is_structural_change) {
+				this._apply_structural_sync(remote_state);
+			} else {
+				this._apply_position_sync(remote_state);
+			}
+
+			// Update zoom/pan if present
+			if (remote_state.zoom !== undefined) {
+				this._zoom = remote_state.zoom;
+				this._pan_x = remote_state.pan?.x || 0;
+				this._pan_y = remote_state.pan?.y || 0;
+				this._apply_transform();
+			}
+
+			// Update local timestamp
+			this._last_remote_timestamp = remote_timestamp;
+
+		} finally {
+			// Always unset flag, even if error occurs
+			this._applying_remote_state = false;
+		}
+	}
+
+	/**
+	 * Lightweight position-only sync for existing nodes.
+	 * Used when no structural changes detected (same nodes, same edges).
+	 */
+	_apply_position_sync(remote_state) {
+		// Match local nodes to remote nodes by doctype
+		for (const [node_id, local_node] of this.nodes.entries()) {
+			if (local_node.doctype === this.board.doctype) {
+				// Update base node position too
+				const remote_base = remote_state.nodes.find(
+					rn => rn.doctype === this.board.doctype
+				);
+				if (remote_base?.position) {
+					local_node.el.style.left = remote_base.position.left + 'px';
+					local_node.el.style.top = remote_base.position.top + 'px';
+				}
+				continue;
+			}
+
+			const remote_node = remote_state.nodes.find(
+				rn => rn.doctype === local_node.doctype
+			);
+			if (remote_node?.position) {
+				local_node.el.style.left = remote_node.position.left + 'px';
+				local_node.el.style.top = remote_node.position.top + 'px';
+			}
+		}
+		this._render_edges();
+	}
+
+	/**
+	 * Full structural sync - removes/adds nodes and edges to match remote state.
+	 * Called when remote state has different nodes or edges than local.
+	 */
+	_apply_structural_sync(remote_state) {
+		const remote_non_base = (remote_state.nodes || [])
+			.filter(n => n.doctype !== this.board.doctype);
+		const remote_doctypes = new Set(remote_non_base.map(n => n.doctype));
+
+		// ── Step 1: Remove local non-base nodes that don't exist in remote ──
+		const local_non_base = [...this.nodes.entries()]
+			.filter(([_, n]) => n.doctype !== this.board.doctype);
+
+		for (const [node_id, node] of local_non_base) {
+			if (!remote_doctypes.has(node.doctype)) {
+				// Remove edges connected to this node
+				const connected = this.edges.filter(
+					e => e.src_node_id === node_id || e.tgt_node_id === node_id
+				);
+				connected.forEach(e => this._delete_edge(e));
+				this.edges = this.edges.filter(
+					e => e.src_node_id !== node_id && e.tgt_node_id !== node_id
+				);
+				node.el.remove();
+				this.nodes.delete(node_id);
+			}
+		}
+
+		// ── Step 2: Update base node position ──────────────────────────────
+		const remote_base = remote_state.nodes.find(
+			n => n.doctype === this.board.doctype
+		);
+		const local_base = [...this.nodes.values()].find(
+			n => n.doctype === this.board.doctype
+		);
+		if (remote_base?.position && local_base) {
+			local_base.el.style.left = remote_base.position.left + 'px';
+			local_base.el.style.top = remote_base.position.top + 'px';
+		}
+
+		// ── Step 3: Add new nodes from remote / update existing positions ──
+		// Maps remote node id → local node id (for edge restoration)
+		const remote_to_local = new Map();
+
+		// Map base node
+		if (local_base && remote_base) {
+			remote_to_local.set(remote_base.id, local_base.id);
+		}
+
+		// Existing local non-base: update position, build mapping
+		for (const [node_id, node] of this.nodes.entries()) {
+			if (node.doctype === this.board.doctype) continue;
+			const remote_node = remote_non_base.find(rn => rn.doctype === node.doctype);
+			if (remote_node) {
+				remote_to_local.set(remote_node.id, node_id);
+				if (remote_node.position) {
+					node.el.style.left = remote_node.position.left + 'px';
+					node.el.style.top = remote_node.position.top + 'px';
+				}
+			}
+		}
+
+		// New nodes: doctypes in remote but not locally
+		const local_doctypes_now = new Set(
+			[...this.nodes.values()]
+				.filter(n => n.doctype !== this.board.doctype)
+				.map(n => n.doctype)
+		);
+
+		const nodes_to_add = remote_non_base.filter(
+			rn => !local_doctypes_now.has(rn.doctype)
+		);
+
+		let pending_loads = nodes_to_add.length;
+
+		const _finish_structural_sync = () => {
+			// ── Step 4: Sync edges ─────────────────────────────────────────
+			// Remove all existing edges first
+			this.edges.forEach(e => this._delete_edge(e));
+			this.edges = [];
+
+			// Recreate edges from remote state
+			(remote_state.edges || []).forEach(re => {
+				const local_src = remote_to_local.get(re.src_node_id);
+				const local_tgt = remote_to_local.get(re.tgt_node_id);
+				if (!local_src || !local_tgt) return;
+
+				const path_el = this._create_svg_path("ev-jc-edge ev-jc-edge--pending");
+				const new_edge = {
+					id:          `edge_${this._edge_ctr++}`,
+					src_node_id: local_src,
+					src_field:   re.src_field,
+					tgt_node_id: local_tgt,
+					tgt_field:   re.tgt_field,
+					valid:       re.valid ?? null,
+					confidence:  re.confidence ?? null,
+					method:      re.method ?? null,
+					path_el,
+					badge_el:    null,
+					_remove_timer: null,
+					_restored:   true,  // Flag: from remote sync, skip auto-save on validate
+				};
+				this.edges.push(new_edge);
+
+				// Re-validate edge (updates badge/styling)
+				this._validate_edge(new_edge);
+			});
+
+			this._render_edges();
+		};
+
+		if (pending_loads === 0) {
+			_finish_structural_sync();
+			return;
+		}
+
+		// Load new node doctypes and add them
+		nodes_to_add.forEach(remote_node => {
+			frappe.model.with_doctype(remote_node.doctype, () => {
+				const new_id = this._add_node(remote_node.doctype, { base: false });
+				remote_to_local.set(remote_node.id, new_id);
+
+				// Set position from remote
+				if (remote_node.position) {
+					const node_el = this.nodes.get(new_id)?.el;
+					if (node_el) {
+						node_el.style.left = remote_node.position.left + 'px';
+						node_el.style.top = remote_node.position.top + 'px';
+					}
+				}
+
+				// Restore selected_fields checkboxes
+				if (remote_node.selected_fields?.length) {
+					const canvas_node = this.nodes.get(new_id);
+					const fields_div = canvas_node?.el.querySelector('.ev-jc-node-fields');
+					remote_node.selected_fields.forEach(f => {
+						const cb = fields_div?.querySelector(
+							`[data-field="${f}"] .ev-field-select`
+						);
+						if (cb && !cb.checked) {
+							cb.checked = true;
+							cb.dispatchEvent(new Event('change'));
+						}
+					});
+				}
+
+				pending_loads--;
+				if (pending_loads === 0) {
+					_finish_structural_sync();
+				}
+			});
+		});
+	}
+
+	/**
+	 * Phase 4: Broadcast node position update (lightweight, no DB save).
+	 * Used during drag for real-time position sync across users.
+	 *
+	 * @param {String} node_id - Node ID being moved
+	 * @param {Object} position - {left, top} in pixels
+	 */
+	_broadcast_node_position(node_id, position) {
+		if (!this.active_session_id || !frappe.realtime?.socket) return;
+
+		// Emit lightweight position-only update (no DB write)
+		frappe.realtime.socket.emit('canvas_node_moved', {
+			session_id: this.active_session_id,
+			node_id: node_id,
+			position: position,
+			user: frappe.session.user
+		});
 	}
 };

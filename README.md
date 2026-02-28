@@ -33,6 +33,7 @@ Works on **vanilla Frappe** and optionally unlocks ERPNext-specific formula func
 - **Join Path Finder** — BFS shortest path through schema graph; auto-builds multi-hop node chains in one click
 - **4-Layer Validation Engine** — Meta Guard → Pattern Matcher → Type Gate (hard incompatibility → instant red wire) → Value Overlap → Semantic (RapidFuzz); works entirely without LLMs
 - **Association Rule Mining** — mlxtend Apriori on joined data surfaces co-occurrence patterns (IF customer=X THEN territory=Y, lift ≥ 1.2)
+- **Generative BI Chat** — Natural language join discovery: "show me tasks to employee" with enhanced NLP (50+ stopwords, pattern matching, fuzzy DocType matching); clean modern UI with staggered card animations and smooth hover expansion
 
 ---
 
@@ -61,7 +62,40 @@ bench build --app excel_view   # required after every pull (dist files are not c
 
 ## Release Notes
 
-### v2.5+ — Current (Feb 2026)
+### v2.7 — Current (Mar 2026)
+
+**GenBI AI Conversational Bot — Multi-Turn Intelligence**
+
+- **AI Conversational Engine** — Complete rewrite from fuzzy-only to full NLP stack with multi-turn conversation memory
+  - **6 Intent Classification** — FIND_PATH, EXPLAIN, BUILD_CANVAS, SUGGEST, ANALYZE_DATA, REFINE using sentence-transformers semantic matching (all-MiniLM-L6-v2)
+  - **3-Phase Entity Resolution** — Pronoun resolution → Exact match → Fuzzy (60%) + Semantic (40%) composite scoring with spaCy + embeddings
+  - **Conversation State** — Redis-backed session memory (1-hour TTL); tracks last entities, paths, canvas state, follow-up mode
+  - **Relationship Explanations** — Generates human-readable explanations with business context ("Sales funnel: tracking leads through conversion to orders"), Link field direction (1:1, 1:N, N:M), confidence reasoning
+  - **Data Insights** — Row counts, empty table warnings, cardinality analysis (1:N explosion detection), filter suggestions per DocType
+  - **Query Parser** — Complex query parsing using spaCy dependency parsing for auto-canvas building ("employee salary with deductions grouped by department")
+- **Enhanced UI** — Follow-up suggestion pills (interactive chips for next queries), disambiguation buttons when multiple entities match, explanation bubbles with expandable sections, data availability badges (✓ Has data / ⚠ Empty tables)
+- **Smart Context** — "Build this canvas" uses last explained path from conversation; pronoun resolution ("explain it" → resolves "it" from context); showing "top 10 of 200 paths" instead of overwhelming users
+- **Production Ready** — Auto-installs via requirements.txt (spaCy model as direct wheel URL); Frappe Cloud/Docker compatible; ~92 MB models cached after first install; no external API keys needed
+- **New Backend Modules** — 7 modules in `excel_view/genbi/`: conversation.py, intent_classifier.py, entity_resolver.py, explainer.py, query_parser.py, data_insights.py, __init__.py
+- **New API Endpoint** — `genbi_chat(query, session_id, base_doctype)` replaces simple fuzzy search with full conversational AI
+- **Dependencies Added** — spacy>=3.7, sentence-transformers>=2.2, en_core_web_sm model (auto-installed)
+- **Files modified:** [api.py](excel_view/api.py), [join_canvas.js](excel_view/public/js/excel/components/join_canvas.js), [excel_view.bundle.scss](excel_view/public/scss/excel_view.bundle.scss), [requirements.txt](requirements.txt), [pyproject.toml](pyproject.toml)
+
+---
+
+### v2.6 — Feb 2026
+
+**Generative BI UX Polish + Enhanced NLP**
+
+- **Modern Chat UI** — Redesigned Generative BI results with clean cards (removed 3x data redundancy), confidence badges, hop counts, and estimated field counts; no more verbose badge clutter
+- **Staggered Animation** — Sequential card loading with 80ms stagger delay for smooth visual feedback (400ms ease transition per card)
+- **Hover Expansion** — Card titles smoothly expand from single-line to multi-line on hover (cubic-bezier animation) instead of static tooltips
+- **Enhanced NLP** — Query parser expanded from 13 to 50+ stopwords; supports natural phrasing ("show me tasks to employee", "connect employee with their tasks") with pattern matching regex; improved multi-word DocType fuzzy matching (rapidfuzz token_sort_ratio)
+- **Files modified:** [join_canvas.js](excel_view/public/js/excel/components/join_canvas.js), [api.py](excel_view/api.py), [excel_view.bundle.scss](excel_view/public/scss/excel_view.bundle.scss)
+
+---
+
+### v2.5+ — Feb 2026
 
 **Child Table Support + Aggregate Mode in IntelliFlow Canvas**
 

@@ -1,0 +1,50 @@
+{
+ "actions": [],
+ "creation": "2026-02-28 13:04:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "user",
+  "role",
+  "joined_at"
+ ],
+ "fields": [
+  {
+   "fieldname": "user",
+   "fieldtype": "Link",
+   "in_list_view": 1,
+   "label": "User",
+   "options": "User",
+   "reqd": 1
+  },
+  {
+   "default": "Editor",
+   "fieldname": "role",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Role",
+   "options": "Editor\nViewer",
+   "reqd": 1
+  },
+  {
+   "default": "Now",
+   "fieldname": "joined_at",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Joined At",
+   "read_only": 1
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "istable": 1,
+ "links": [],
+ "modified": "2026-02-28 13:04:00.000000",
+ "modified_by": "Administrator",
+ "module": "Excel View",
+ "name": "Canvas Session Collaborator",
+ "owner": "Administrator",
+ "permissions": [],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

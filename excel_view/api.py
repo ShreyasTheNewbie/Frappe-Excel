@@ -28,6 +28,15 @@ V2.3 — Frappe Formula Library
 import frappe
 from frappe import _
 
+
+def _check_doctype_permission(doctype, ptype="read"):
+	"""Check permission, skipping child table DocTypes (they inherit from parent)."""
+	meta = frappe.get_meta(doctype)
+	if meta.istable:
+		return  # Child tables inherit permissions from parent; skip standalone check
+	frappe.has_permission(doctype, ptype, throw=True)
+
+
 # ── V2.3 helpers ──────────────────────────────────────────────────────────────
 
 #: Fields that exist on every DocType but are NOT in meta.fields — always valid.
@@ -603,8 +612,10 @@ def _cardinality_and_coverage(src_list: list, tgt_list: list):
 #   Before: suggest_joins ≈ 300 get_meta() calls  ≈ 300 DB queries
 #   After : 1-2 SQL JOIN queries → edge list       → cached, no repeat
 
-_GRAPH_CACHE_KEY = "ev_link_graph_edges_v2"  # bump when SQL schema changes
+_GRAPH_CACHE_KEY = "ev_link_graph_edges_v3"  # v3: includes Dynamic Link
 _GRAPH_CACHE_TTL = 300  # seconds
+_DYNAMIC_LINK_CACHE_KEY = "ev_dynamic_link_edges_v1"
+_DYNAMIC_LINK_SAMPLE_LIMIT = 500  # Sample size for Dynamic Link detection
 
 
 def _get_all_link_edges() -> list:
@@ -657,7 +668,182 @@ def _get_all_link_edges() -> list:
 		  AND  tgt.issingle = 0 AND tgt.istable = 0
 	"""
 	edges = [dict(row) for row in frappe.db.sql(sql, as_dict=True)]
+
+	# Add Dynamic Link edges (polymorphic relationships)
+	dynamic_edges = _get_dynamic_link_edges()
+	edges.extend(dynamic_edges)
+
 	frappe.cache().set_value(_GRAPH_CACHE_KEY, edges, expires_in_sec=_GRAPH_CACHE_TTL)
+	return edges
+
+
+def _get_dynamic_link_edges() -> list:
+	"""
+	Detect Dynamic Link relationships - polymorphic joins where target is determined
+	by another field's value.
+
+	Dynamic Link detection uses the `options` field to find the reference field,
+	then determines targets based on that field's type:
+
+	Case 1 - Select field (deterministic):
+	  party_type (Select: "Customer\nSupplier\nEmployee")
+	  party (Dynamic Link → party_type)
+	  → Targets: Customer, Supplier, Employee (parsed from Select options)
+
+	Case 2 - Link to DocType (data sampling):
+	  reference_doctype (Link → DocType)
+	  reference_name (Dynamic Link → reference_doctype)
+	  → Sample data to discover which DocTypes are actually used
+
+	Case 3 - Link with set_query (data sampling):
+	  link_doctype (Link → DocType, controller restricts via set_query)
+	  link_name (Dynamic Link → link_doctype)
+	  → Sample data to discover actual usage
+
+	Common in: Comment, Address, Contact, File, Version, Communication, Payment Entry
+
+	Returns edges with metadata:
+	  {
+	    "doctype": source DocType,
+	    "fieldname": Dynamic Link field,
+	    "label": field label,
+	    "target": discovered target DocType,
+	    "is_child_src": 0 or 1,
+	    "is_dynamic": True,
+	    "ref_field": reference field name,
+	    "ref_field_type": "Select" or "Link",
+	    "detection_method": "select" or "data_sample",
+	    "sample_count": count (None for Select, int for sampled)
+	  }
+	"""
+	cached = frappe.cache().get_value(_DYNAMIC_LINK_CACHE_KEY)
+	if cached is not None:
+		return cached
+
+	# Step 1: Find all Dynamic Link fields
+	dynamic_fields_sql = """
+		SELECT df.parent      AS doctype,
+		       df.fieldname,
+		       COALESCE(NULLIF(df.label, ''), df.fieldname) AS label,
+		       df.options     AS ref_field,
+		       src.istable    AS is_child_src
+		FROM   `tabDocField` df
+		JOIN   `tabDocType`  src ON src.name = df.parent
+		WHERE  df.fieldtype = 'Dynamic Link'
+		  AND  df.options IS NOT NULL AND df.options != ''
+		  AND  src.issingle = 0
+
+		UNION ALL
+
+		SELECT cf.dt          AS doctype,
+		       cf.fieldname,
+		       COALESCE(NULLIF(cf.label, ''), cf.fieldname) AS label,
+		       cf.options     AS ref_field,
+		       src.istable    AS is_child_src
+		FROM   `tabCustom Field` cf
+		JOIN   `tabDocType`  src ON src.name = cf.dt
+		WHERE  cf.fieldtype = 'Dynamic Link'
+		  AND  cf.options IS NOT NULL AND cf.options != ''
+		  AND  src.issingle = 0
+	"""
+	dynamic_fields = frappe.db.sql(dynamic_fields_sql, as_dict=True)
+
+	if not dynamic_fields:
+		frappe.cache().set_value(_DYNAMIC_LINK_CACHE_KEY, [], expires_in_sec=_GRAPH_CACHE_TTL)
+		return []
+
+	# Step 2: For each Dynamic Link field, determine targets based on ref field type
+	edges = []
+
+	for df in dynamic_fields:
+		try:
+			# Find the reference field's meta to determine how to get targets
+			meta = frappe.get_meta(df["doctype"])
+			ref_field_obj = meta.get_field(df["ref_field"])
+
+			if not ref_field_obj:
+				continue  # Reference field doesn't exist
+
+			targets_data = []
+
+			# Case 1: Select field - parse options directly (no data sampling needed!)
+			if ref_field_obj.fieldtype == "Select" and ref_field_obj.options:
+				# Options are newline-separated: "Customer\nSupplier\nEmployee"
+				select_options = [opt.strip() for opt in ref_field_obj.options.split("\n") if opt.strip()]
+
+				# Each option is a potential target DocType
+				for target_dt in select_options:
+					# First check if DocType exists in tabDocType (fast DB check)
+					exists = frappe.db.exists("DocType", target_dt)
+					if not exists:
+						continue  # DocType doesn't exist - skip silently
+
+					# Now safely get meta (we know it exists)
+					try:
+						target_meta = frappe.get_meta(target_dt)
+						if not target_meta.issingle and not target_meta.istable:
+							targets_data.append({
+								"target_doctype": target_dt,
+								"count": None,  # No count for Select (all are possible)
+								"method": "select"
+							})
+					except Exception:
+						continue  # Meta fetch failed - skip
+
+			# Case 2 & 3: Link field (to DocType or restricted) - sample actual data
+			elif ref_field_obj.fieldtype == "Link":
+				sample_sql = """
+					SELECT `{ref_field}` AS target_doctype, COUNT(*) AS count
+					FROM `tab{doctype}`
+					WHERE `{ref_field}` IS NOT NULL AND `{ref_field}` != ''
+					GROUP BY `{ref_field}`
+					LIMIT {limit}
+				""".format(
+					doctype=df["doctype"],
+					ref_field=df["ref_field"],
+					limit=_DYNAMIC_LINK_SAMPLE_LIMIT
+				)
+
+				sampled_targets = frappe.db.sql(sample_sql, as_dict=True)
+
+				for row in sampled_targets:
+					# First check if DocType exists (fast DB check)
+					exists = frappe.db.exists("DocType", row["target_doctype"])
+					if not exists:
+						continue  # DocType doesn't exist - skip silently
+
+					# Now safely get meta
+					try:
+						target_meta = frappe.get_meta(row["target_doctype"])
+						if not target_meta.issingle and not target_meta.istable:
+							targets_data.append({
+								"target_doctype": row["target_doctype"],
+								"count": row["count"],
+								"method": "data_sample"
+							})
+					except Exception:
+						continue
+
+				# Create edges for discovered targets
+				for target_info in targets_data:
+					edges.append({
+						"doctype": df["doctype"],
+						"fieldname": df["fieldname"],
+						"label": df["label"],
+						"target": target_info["target_doctype"],
+						"is_child_src": df["is_child_src"],
+						"is_dynamic": True,
+						"ref_field": df["ref_field"],
+						"ref_field_type": ref_field_obj.fieldtype,
+						"detection_method": target_info["method"],
+						"sample_count": target_info.get("count")
+					})
+
+		except Exception:
+			# If table doesn't exist or meta fetch fails, skip this Dynamic Link
+			continue
+
+	frappe.cache().set_value(_DYNAMIC_LINK_CACHE_KEY, edges, expires_in_sec=_GRAPH_CACHE_TTL)
 	return edges
 
 
@@ -685,8 +871,8 @@ def validate_join(
 	"""
 	from rapidfuzz import fuzz as _fuzz
 
-	frappe.has_permission(src_doctype, "read", throw=True)
-	frappe.has_permission(tgt_doctype, "read", throw=True)
+	_check_doctype_permission(src_doctype)
+	_check_doctype_permission(tgt_doctype)
 
 	# ── Layer 0: Meta Guard ───────────────────────────────────────────────────
 	# Case A: src_doctype.src_field is a Link → tgt_doctype, joined on tgt.name
@@ -718,6 +904,37 @@ def validate_join(
 					"src_pattern": "naming_series", "tgt_pattern": "naming_series",
 					"message": f"Link field: {tgt_doctype}.{df.label or df.fieldname} → {src_doctype}",
 				}
+
+	# Case C: Child Table → Parent via "parent" system field
+	# src_doctype is a child table, src_field="parent", tgt_field="name"
+	# Validate that tgt_doctype actually uses src_doctype as a child table
+	src_meta = frappe.get_meta(src_doctype)
+	if src_meta.istable and src_field == "parent" and tgt_field == "name":
+		# Check if tgt_doctype has a Table field with options=src_doctype
+		parent_uses_child = frappe.db.exists({
+			"doctype": "DocField",
+			"parent": tgt_doctype,
+			"fieldtype": "Table",
+			"options": src_doctype,
+		}) or frappe.db.exists({
+			"doctype": "Custom Field",
+			"dt": tgt_doctype,
+			"fieldtype": "Table",
+			"options": src_doctype,
+		})
+
+		if parent_uses_child:
+			# Sample and validate the parent field values
+			parent_vals = [str(r) for r in frappe.get_all(src_doctype, pluck="parent", limit=100) if r]
+			tgt_vals = [str(r) for r in frappe.get_all(tgt_doctype, pluck="name", limit=100) if r]
+			cardinality, coverage = _cardinality_and_coverage(parent_vals, tgt_vals)
+
+			return {
+				"valid": True, "confidence": 1.0, "method": "meta", "grade": "S",
+				"cardinality": cardinality, "coverage": coverage,
+				"src_pattern": "naming_series", "tgt_pattern": "naming_series",
+				"message": f"Child table relationship: {src_doctype}.parent → {tgt_doctype}",
+			}
 
 	# ── Layers 1-4: ML pipeline ───────────────────────────────────────────────
 	src_prof = _sample_and_profile(src_doctype, src_field)
@@ -847,9 +1064,111 @@ def suggest_joins(base_doctype: str, force_refresh: bool = False) -> list:
 		"HTML", "Custom HTML", "Table", "Table MultiSelect", "Password",
 	}
 
+	candidates = {}
+
+	# Layer 0: Intelligent Child Table Parent Detection (3-signal validation)
+	# If base_doctype is a child table, use 3 signals to find parent DocType(s):
+	#   Signal 1 (Meta):      Which DocTypes have Table field pointing to this child
+	#   Signal 2 (Data):      Sample 'parent' field values and validate existence
+	#   Signal 3 (Parenttype): Check what parenttype field says (polymorphic awareness)
+	base_meta = frappe.get_meta(base_doctype)
+	if base_meta.istable:
+		# Signal 1: Meta - DocTypes with Table field options=base_doctype
+		meta_parents = frappe.db.sql("""
+			SELECT DISTINCT parent AS doctype, label, fieldname
+			FROM `tabDocField`
+			WHERE fieldtype = 'Table' AND options = %(child)s
+			UNION
+			SELECT DISTINCT dt AS doctype, label, fieldname
+			FROM `tabCustom Field`
+			WHERE fieldtype = 'Table' AND options = %(child)s
+		""", {"child": base_doctype}, as_dict=True)
+
+		if not meta_parents:
+			pass  # No parents found in meta — skip child table detection
+		else:
+			# Signal 2: Data - sample parent field values (limit 200 for performance)
+			try:
+				parent_samples = frappe.get_all(
+					base_doctype,
+					fields=["parent"],
+					filters={"parent": ["!=", ""]},
+					limit_page_length=200,
+					pluck="parent",
+				)
+				parent_samples_set = set(parent_samples) if parent_samples else set()
+			except Exception:
+				parent_samples_set = set()
+
+			# Signal 3: Parenttype - what does the data say? (polymorphic child tables)
+			try:
+				parenttype_counts = frappe.db.sql("""
+					SELECT parenttype, COUNT(*) as count
+					FROM `tab{0}`
+					WHERE parenttype IS NOT NULL AND parenttype != ''
+					GROUP BY parenttype
+					ORDER BY count DESC
+				""".format(base_doctype), as_dict=True)
+				total_pt = sum(pt["count"] for pt in parenttype_counts) if parenttype_counts else 0
+			except Exception:
+				parenttype_counts = []
+				total_pt = 0
+
+			# Process each candidate parent with 3-signal scoring
+			for p in meta_parents:
+				try:
+					if not frappe.has_permission(p["doctype"], "read"):
+						continue
+
+					parent_dt = p["doctype"]
+					meta_conf = 1.0  # Meta signal is always 1.0 (definitive)
+
+					# Data validation: how many sampled parent values exist in parent_dt?
+					data_conf = 0.0
+					if parent_samples_set:
+						try:
+							parent_dt_names = set(
+								frappe.get_all(parent_dt, pluck="name", limit_page_length=300)
+							)
+							overlap = len(parent_samples_set & parent_dt_names)
+							data_conf = overlap / len(parent_samples_set) if parent_samples_set else 0.0
+						except Exception:
+							data_conf = 0.0
+
+					# Parenttype confirmation: does parenttype field point to this parent?
+					pt_conf = 0.0
+					if parenttype_counts and total_pt > 0:
+						pt_match = next(
+							(pt for pt in parenttype_counts if pt["parenttype"] == parent_dt),
+							None,
+						)
+						if pt_match:
+							pt_conf = pt_match["count"] / total_pt
+
+					# Final confidence: weighted average of 3 signals
+					# Meta=50% (definitive), Data=30% (validation), Parenttype=20% (confirmation)
+					final_conf = round(0.50 * meta_conf + 0.30 * data_conf + 0.20 * pt_conf, 2)
+
+					# Build reason string with signal breakdown
+					reason_parts = [f"{base_doctype} (child table)"]
+					if data_conf > 0:
+						reason_parts.append(f"data: {int(data_conf * 100)}%")
+					if pt_conf > 0:
+						reason_parts.append(f"type: {int(pt_conf * 100)}%")
+
+					candidates[parent_dt] = dict(
+						doctype=parent_dt,
+						src_field="parent",
+						tgt_field="name",
+						score=final_conf,
+						method="child_parent",
+						reason=" | ".join(reason_parts),
+					)
+				except Exception:
+					pass
+
 	# Layer A: scan cached edge list — O(E), 0 extra DB queries
 	edges      = _get_all_link_edges()
-	candidates = {}
 
 	for e in edges:
 		dt, tgt = e["doctype"], e["target"]
@@ -956,8 +1275,8 @@ def suggest_joins(base_doctype: str, force_refresh: bool = False) -> list:
 		except Exception:
 			continue
 
-	# Sort: regular meta first (alphabetical), then child_table (alphabetical), then ML (score desc)
-	METHOD_ORDER = {"meta": 0, "child_table": 1, "ml": 2}
+	# Sort: child_parent (intelligent 3-signal) first, then meta links, then child_table, then ML
+	METHOD_ORDER = {"child_parent": 0, "meta": 1, "child_table": 2, "ml": 3}
 	return sorted(
 		candidates.values(),
 		key=lambda x: (METHOD_ORDER.get(x["method"], 9), -x["score"], x["doctype"]),
@@ -975,8 +1294,8 @@ def rank_field_matches(src_doctype: str, src_field: str, tgt_doctype: str) -> di
 	from sklearn.metrics.pairwise import cosine_similarity
 	from rapidfuzz import fuzz
 
-	frappe.has_permission(src_doctype, "read", throw=True)
-	frappe.has_permission(tgt_doctype, "read", throw=True)
+	_check_doctype_permission(src_doctype)
+	_check_doctype_permission(tgt_doctype)
 
 	SKIP = {
 		"Section Break", "Column Break", "Tab Break", "Fold", "Heading",
@@ -1028,8 +1347,8 @@ def find_join_path(src_doctype: str, tgt_doctype: str) -> list:
 	"""
 	import networkx as nx
 
-	frappe.has_permission(src_doctype, "read", throw=True)
-	frappe.has_permission(tgt_doctype, "read", throw=True)
+	_check_doctype_permission(src_doctype)
+	_check_doctype_permission(tgt_doctype)
 
 	# Build graph entirely from cached edge list — zero extra DB calls
 	G = nx.DiGraph()
@@ -1385,8 +1704,8 @@ def detect_lookup(src_doctype: str, tgt_doctype: str) -> list:
 	Returns [{src_field, tgt_field, label, layer, confidence}] sorted by confidence desc.
 	Returns [] if no link candidate found with confidence ≥ 0.3.
 	"""
-	frappe.has_permission(src_doctype, "read", throw=True)
-	frappe.has_permission(tgt_doctype, "read", throw=True)
+	_check_doctype_permission(src_doctype)
+	_check_doctype_permission(tgt_doctype)
 
 	results = []
 
@@ -1574,3 +1893,968 @@ def cluster_data(
 	]
 
 	return {"rows": rows_data, "n_clusters": k, "summary": summary}
+
+
+# ── V2.5+ — Generative BI: NL Query → Auto-Canvas ────────────────────────────
+
+def _extract_doctypes_from_query(query: str, threshold: float = 0.65) -> list:
+	"""
+	Extract DocType names from a natural language query using fuzzy matching.
+
+	Uses rapidfuzz to match query tokens against all non-single, non-virtual DocTypes.
+	Returns sorted list of {doctype, score, matched_token} dictionaries.
+
+	Args:
+	    query: Natural language query (e.g., "employee to salary slip flow")
+	    threshold: Minimum fuzzy match score (0-1) to consider a match
+
+	Returns:
+	    [{doctype: str, score: float, matched_token: str}] sorted by score desc
+
+	Examples:
+	    "employee to salary slip" → [Employee, Salary Slip]
+	    "user project task" → [User, Project, Task]
+	"""
+	from rapidfuzz import process, fuzz
+
+	# Get all non-single, non-virtual DocTypes
+	all_doctypes = frappe.get_all(
+		"DocType",
+		filters={
+			"issingle": 0,
+			"is_virtual": 0,
+		},
+		pluck="name",
+	)
+
+	if not all_doctypes:
+		return []
+
+	# Enhanced stopwords for natural language
+	STOPWORDS = {
+		"to", "from", "and", "or", "the", "a", "an", "of", "for", "with",
+		"flow", "end", "give", "me", "show", "get", "find", "list", "all",
+		"connect", "link", "join", "relate", "relationship", "between",
+		"their", "my", "our", "is", "are", "was", "were", "have", "has",
+		"on", "in", "at", "by", "via", "through", "using", "working",
+		"assigned", "related", "linked", "connected", "associated",
+		"what", "which", "where", "when", "how", "who", "that", "this",
+		"i", "want", "need", "can", "you", "we", "they", "them", "it"
+	}
+
+	# Pre-process query to handle common patterns
+	query_lower = query.lower()
+
+	# Pattern matching for natural language structures
+	import re
+	patterns = [
+		(r"show me (.*)", r"\1"),  # "show me projects" → "projects"
+		(r"connect to (.*)", r"\1"),  # "connect to timesheet" → "timesheet"
+		(r"link with (.*)", r"\1"),  # "link with salary" → "salary"
+		(r"join with (.*)", r"\1"),  # "join with tasks" → "tasks"
+		(r".*working on (.*)", r"\1"),  # "employees working on projects" → "projects"
+		(r".*assigned to (.*)", r"\1"),  # "tasks assigned to users" → "users"
+		(r"get all (.*)", r"\1"),  # "get all invoices" → "invoices"
+	]
+
+	for pattern, replacement in patterns:
+		match = re.match(pattern, query_lower)
+		if match:
+			query_lower = re.sub(pattern, replacement, query_lower).strip()
+			break
+
+	# Tokenize query (split on spaces, remove stopwords)
+	tokens = [
+		t.strip().lower()
+		for t in query_lower.split()
+		if t.strip().lower() not in STOPWORDS and len(t.strip()) > 2
+	]
+
+	if not tokens:
+		return []
+
+	# Try matching full query first (for multi-word DocTypes)
+	matches = []
+	seen_doctypes = set()
+
+	# Match entire cleaned query (handles "sales order", "salary slip" etc.)
+	full_query_results = process.extract(
+		query_lower,
+		all_doctypes,
+		scorer=fuzz.token_sort_ratio,
+		limit=5,
+	)
+
+	for doctype, score, _ in full_query_results:
+		normalized_score = score / 100.0
+		if normalized_score >= max(threshold - 0.1, 0.5):  # Slightly lower threshold for full query
+			matches.append({
+				"doctype": doctype,
+				"score": round(normalized_score, 2),
+				"matched_token": query_lower,
+			})
+			seen_doctypes.add(doctype)
+
+	# Match each token against all DocTypes (for partial matches)
+	for token in tokens:
+		# Use rapidfuzz process.extract for best matches
+		results = process.extract(
+			token,
+			all_doctypes,
+			scorer=fuzz.token_sort_ratio,
+			limit=3,  # Top 3 matches per token
+		)
+
+		for doctype, score, _ in results:
+			normalized_score = score / 100.0
+			if normalized_score >= threshold and doctype not in seen_doctypes:
+				matches.append({
+					"doctype": doctype,
+					"score": round(normalized_score, 2),
+					"matched_token": token,
+				})
+				seen_doctypes.add(doctype)
+
+	# Sort by score descending
+	return sorted(matches, key=lambda x: -x["score"])
+
+
+def _auto_select_fields(doctype: str, max_fields: int = 5) -> list:
+	"""
+	Auto-select the most relevant fields for a DocType to show in canvas output.
+
+	Prioritizes:
+	1. Link fields (for relationship context)
+	2. Select/Data fields with short labels (key identifiers)
+	3. Status/state fields (workflow info)
+	4. Numeric fields (metrics)
+
+	Excludes system fields, long text, attachments, etc.
+
+	Args:
+	    doctype: DocType name
+	    max_fields: Maximum fields to return
+
+	Returns:
+	    [fieldname, fieldname, ...] sorted by relevance
+	"""
+	SKIP_TYPES = {
+		"Section Break", "Column Break", "Tab Break", "Fold", "Heading",
+		"HTML", "Custom HTML", "Table", "Table MultiSelect", "Password",
+		"Long Text", "Text Editor", "Markdown Editor", "HTML Editor",
+		"Attach", "Attach Image", "Signature", "Geolocation",
+	}
+
+	PRIORITY_TYPES = {
+		"Link": 100,
+		"Select": 80,
+		"Data": 70,
+		"Check": 60,
+		"Currency": 50,
+		"Int": 50,
+		"Float": 50,
+	}
+
+	STATUS_KEYWORDS = {"status", "state", "stage", "workflow"}
+
+	try:
+		meta = frappe.get_meta(doctype)
+	except Exception:
+		# DocType doesn't exist or is invalid - return empty list
+		return []
+
+	scored_fields = []
+
+	for df in meta.fields:
+		if df.fieldtype in SKIP_TYPES or df.is_virtual or df.hidden:
+			continue
+
+		# Base score from field type
+		score = PRIORITY_TYPES.get(df.fieldtype, 10)
+
+		# Boost status/state fields
+		label_lower = (df.label or df.fieldname).lower()
+		if any(kw in label_lower for kw in STATUS_KEYWORDS):
+			score += 50
+
+		# Penalty for long labels (likely description fields)
+		if len(df.label or df.fieldname) > 30:
+			score -= 20
+
+		# Boost required fields
+		if df.reqd:
+			score += 30
+
+		scored_fields.append({
+			"fieldname": df.fieldname,
+			"score": score,
+			"label": df.label or df.fieldname,
+		})
+
+	# Sort by score descending, take top N
+	scored_fields.sort(key=lambda x: -x["score"])
+	return [f["fieldname"] for f in scored_fields[:max_fields]]
+
+
+@frappe.whitelist()
+def generate_canvas_options(query: str, base_doctype: str = None) -> dict:
+	"""
+	Generate canvas options via BACKWARD SEARCH from base_doctype.
+
+	CRITICAL CHANGE: Always starts from base_doctype (current DocType).
+	Uses backward BFS from target entity to find ALL paths to base.
+
+	Algorithm:
+	1. Extract target DocType from query (e.g., "to sales order" → Sales Order)
+	2. Build directed graph with reverse edges for backward search
+	3. **Backward BFS** from target → base_doctype
+	4. Find ALL paths (no limit), rank by quality
+	5. Reverse paths to show: base → ... → target
+
+	Args:
+	    query: Target entity query (e.g., "to sales order", "employee to timesheet")
+	    base_doctype: Starting DocType (MANDATORY) - current Excel View DocType
+
+	Returns:
+	    {
+	      "query": str,
+	      "base_doctype": str,
+	      "extracted_entities": [{doctype, score, matched_token}],
+	      "options": [{path: [base_doctype, ..., target]}]  # Always base-first!
+	    }
+	"""
+	import networkx as nx
+
+	# Step 0: Validate base_doctype
+	if not base_doctype:
+		frappe.throw(_("base_doctype is required"))
+
+	frappe.has_permission(base_doctype, "read", throw=True)
+
+	# Step 1: Extract target DocType from query
+	# Remove base_doctype from query for better target matching
+	query_clean = query.lower().replace(base_doctype.lower(), "").strip()
+	entities = _extract_doctypes_from_query(query_clean or query, threshold=0.55)
+
+	# Filter out base_doctype from entities (we already know it's the start)
+	entities = [e for e in entities if e["doctype"] != base_doctype]
+
+	if not entities:
+		return {
+			"query": query,
+			"base_doctype": base_doctype,
+			"extracted_entities": [],
+			"options": [],
+			"message": f"Could not identify target DocType from query. Base: {base_doctype}",
+		}
+
+	# Step 2: Build graph from cached edges + child table relationships
+	G = nx.Graph()  # Undirected for bidirectional path finding
+	edges_list = _get_all_link_edges()
+
+	# Add all cached edges (Link, Dynamic Link, Child Table sources)
+	for e in edges_list:
+		# Add edges in both directions (undirected)
+		G.add_edge(e["doctype"], e["target"], **e)
+		G.add_edge(e["target"], e["doctype"], **e)
+
+	# CRITICAL: Add child table → parent relationships via "parent" field
+	# This allows paths like: Timesheet Detail (CT) → Timesheet (parent)
+	# Query: SELECT parent AS doctype, options AS child FROM tabDocField WHERE fieldtype='Table'
+	# IMPORTANT: Join with tabDocType to ensure both parent and child DocTypes exist
+	child_parent_edges = frappe.db.sql("""
+		SELECT DISTINCT df.parent AS parent_doctype, df.options AS child_doctype
+		FROM `tabDocField` df
+		JOIN `tabDocType` parent_dt ON parent_dt.name = df.parent
+		JOIN `tabDocType` child_dt ON child_dt.name = df.options
+		WHERE df.fieldtype = 'Table'
+		  AND df.options IS NOT NULL
+		  AND df.options != ''
+		  AND parent_dt.issingle = 0
+		  AND child_dt.istable = 1
+		UNION
+		SELECT DISTINCT cf.dt AS parent_doctype, cf.options AS child_doctype
+		FROM `tabCustom Field` cf
+		JOIN `tabDocType` parent_dt ON parent_dt.name = cf.dt
+		JOIN `tabDocType` child_dt ON child_dt.name = cf.options
+		WHERE cf.fieldtype = 'Table'
+		  AND cf.options IS NOT NULL
+		  AND cf.options != ''
+		  AND parent_dt.issingle = 0
+		  AND child_dt.istable = 1
+	""", as_dict=True)
+
+	for edge in child_parent_edges:
+		parent_dt = edge["parent_doctype"]
+		child_dt = edge["child_doctype"]
+
+		# Add bidirectional edges: Child.parent → Parent.name
+		G.add_edge(
+			child_dt, parent_dt,
+			doctype=child_dt, target=parent_dt,
+			fieldname="parent", label="Parent",
+			is_child_src=1, is_child_to_parent=True
+		)
+		G.add_edge(
+			parent_dt, child_dt,
+			doctype=parent_dt, target=child_dt,
+			fieldname="(child)", label="Child Table",
+			is_child_src=0, is_parent_to_child=True
+		)
+
+	# Step 3: Find ALL paths from base_doctype to each target entity
+	# CRITICAL: Search from base → target (not bidirectional pairs!)
+	options = []
+	option_id = 0
+
+	for entity in entities:
+		target_dt = entity["doctype"]
+		target_score = entity["score"]
+
+		# Permission check
+		try:
+			if not frappe.has_permission(target_dt, "read"):
+				continue
+		except Exception:
+			continue
+
+		# Find paths from base → target with smart performance limits
+		# Use cutoff=5 (max 4 hops) to avoid timeout on complex graphs
+		try:
+			# Use generator to limit results (max 100 paths per target)
+			path_generator = nx.all_simple_paths(G, source=base_doctype, target=target_dt, cutoff=5)
+
+			all_paths = []
+			for path in path_generator:
+				all_paths.append(path)
+				if len(all_paths) >= 100:  # Stop after 100 paths to prevent timeout
+					break
+
+		except (nx.NetworkXNoPath, nx.NodeNotFound):
+			all_paths = []
+
+		if not all_paths:
+			continue
+
+		# Sort paths by length first (shortest first for best quality)
+		all_paths.sort(key=lambda p: len(p))
+
+		# Generate options from paths
+		for path_idx, path in enumerate(all_paths):  # No limit - we'll sort later
+			# Validate all DocTypes in path exist before processing
+			all_doctypes_valid = True
+			for dt in path:
+				try:
+					frappe.get_meta(dt)
+				except Exception:
+					# DocType doesn't exist - skip this entire path
+					all_doctypes_valid = False
+					break
+
+			if not all_doctypes_valid:
+				continue
+
+			# Build edge details for this path
+			path_edges = []
+			edge_quality_scores = []
+
+			for k in range(len(path) - 1):
+				from_dt = path[k]
+				to_dt = path[k + 1]
+
+				# Get edge data from graph
+				edge_data = G.get_edge_data(from_dt, to_dt) or {}
+
+				# Determine fields + edge quality based on edge direction
+				if edge_data.get("doctype") == from_dt:
+					# Forward edge: from_dt.fieldname → to_dt.name
+					path_edges.append({
+						"from": from_dt,
+						"to": to_dt,
+						"src_field": edge_data.get("fieldname", "name"),
+						"tgt_field": "name",
+						"label": edge_data.get("label", ""),
+						"is_child_src": edge_data.get("is_child_src", 0),
+						"is_dynamic": edge_data.get("is_dynamic", False),
+					})
+				else:
+					# Reverse edge: from_dt.name → to_dt.fieldname
+					path_edges.append({
+						"from": from_dt,
+						"to": to_dt,
+						"src_field": "name",
+						"tgt_field": edge_data.get("fieldname", "name"),
+						"label": edge_data.get("label", ""),
+						"is_child_src": edge_data.get("is_child_src", 0),
+						"is_dynamic": edge_data.get("is_dynamic", False),
+					})
+
+			# Edge quality scoring (critical for ranking!)
+			# Meta Link = 1.0, Parent-Child = 0.9, Dynamic Link = 0.7, ML = 0.3
+			if not edge_data:
+				edge_quality_scores.append(0.3)  # Unknown edge
+			elif edge_data.get("is_child_to_parent") or edge_data.get("is_parent_to_child"):
+				# Special parent-child relationship (child.parent → parent OR parent → child)
+				edge_quality_scores.append(0.9)  # Parent-Child relationship
+			elif edge_data.get("is_dynamic"):
+				edge_quality_scores.append(0.7)  # Dynamic link
+			elif edge_data.get("fieldname"):
+				# Check if it's a real Link field (meta) or ML suggestion
+				# Real Link fields have is_child_src defined (0 or 1)
+				if "is_child_src" in edge_data:
+					# This includes Link fields FROM child tables - they're Meta Links!
+					edge_quality_scores.append(1.0)  # Meta Link field (including from child tables)
+				else:
+					edge_quality_scores.append(0.3)  # ML suggestion
+			else:
+				edge_quality_scores.append(0.5)  # Generic
+
+			# Advanced confidence scoring 🔥
+			# Factor 1: Target extraction confidence (0.55-1.0)
+			entity_conf = target_score
+
+			# Factor 2: Path length penalty (shorter = better, but not too aggressive)
+			# 2 nodes = 1.0, 3 nodes = 0.8, 4 nodes = 0.6, 5 nodes = 0.5
+			path_len_score = max(0.3, 1.0 - (len(path) - 2) * 0.2)
+
+			# Factor 3: Edge quality (average of all edges in path)
+			edge_quality_avg = sum(edge_quality_scores) / len(edge_quality_scores) if edge_quality_scores else 0.5
+
+			# Factor 4: Semantic relevance (penalize weird intermediate DocTypes)
+			# Weird = rarely used in typical business flows, too generic/technical
+			WEIRD_DOCTYPES = {
+				"Currency", "Asset", "Dunning", "Communication Medium", "Web Template",
+				"Sales Invoice Timesheet",  # Too specific child table used as intermediate
+				"UOM", "Country", "Territory", "Price List", "Warehouse Type",
+				"Cost Center", "Fiscal Year", "Payment Terms Template",
+			}
+			# Good = common business entities in typical ERP flows
+			GOOD_DOCTYPES = {
+				"User", "Employee", "Project", "Task", "Department", "Company",
+				"Timesheet", "Timesheet Detail", "Salary Slip", "Attendance",
+				"Project User", "Employee Group", "Activity Type", "Activity Cost",
+				"Sales Order", "Sales Invoice", "Purchase Order", "Purchase Invoice",
+				"Customer", "Supplier", "Item", "BOM", "Work Order", "Stock Entry",
+			}
+
+			# Count weird vs good DocTypes in intermediate nodes (not endpoints)
+			intermediates = path[1:-1] if len(path) > 2 else []
+			weird_count = sum(1 for dt in intermediates if dt in WEIRD_DOCTYPES)
+			good_count = sum(1 for dt in intermediates if dt in GOOD_DOCTYPES)
+
+			# Semantic score: penalize weird paths, boost good ones
+			if weird_count > 0:
+				semantic_score = max(0.3, 1.0 - weird_count * 0.3)
+			elif good_count > 0:
+				semantic_score = min(1.0, 0.8 + good_count * 0.1)
+			else:
+				semantic_score = 0.6  # Neutral
+
+			# Factor 5: Child table bonus (paths with child tables are often useful)
+			ct_bonus = 1.0 + sum(0.1 for e in path_edges if e.get("is_child_src")) * 0.5
+			ct_bonus = min(ct_bonus, 1.3)  # Cap at 30% bonus
+
+			# Final confidence: weighted combination
+			confidence = round(
+				entity_conf * 0.25 +         # 25% entity match
+				path_len_score * 0.20 +      # 20% path length
+				edge_quality_avg * 0.30 +    # 30% edge quality (MOST IMPORTANT!)
+				semantic_score * 0.25,       # 25% semantic relevance
+				3
+			) * ct_bonus
+
+			confidence = min(confidence, 1.0)  # Cap at 1.0
+
+			# Estimate total fields
+			estimated_fields = sum(len(_auto_select_fields(dt, 5)) for dt in path[1:])
+
+			# Generate title and description
+			if len(path) == 2:
+				title = f"Direct: {path[0]} → {path[-1]}"
+				desc = f"Simple join between {path[0]} and {path[-1]}"
+			else:
+				title = f"Via {' → '.join(path[1:-1])}: {path[0]} → {path[-1]}"
+				desc = f"Join path: {' → '.join(path)}"
+
+			options.append({
+				"id": f"opt_{option_id}",
+				"title": title,
+				"description": desc,
+				"confidence": confidence,
+				"path": path,
+				"edges": path_edges,
+				"estimated_fields": estimated_fields,
+			})
+			option_id += 1
+
+	# Sort options by confidence (desc) then path length (asc)
+	# This ensures shortest, highest-quality paths appear first
+	options.sort(key=lambda x: (-x["confidence"], len(x["path"])))
+
+	return {
+		"query": query,
+		"base_doctype": base_doctype,
+		"extracted_entities": entities,
+		"options": options,  # NO LIMIT - return ALL paths!
+		"total_paths": len(options),
+	}
+
+
+@frappe.whitelist()
+def build_canvas_from_option(option: str, base_doctype: str) -> dict:
+	"""
+	Build canvas configuration from selected path option.
+	Creates nodes and edges for the frontend to render.
+
+	Args:
+		option: JSON string of selected option from generate_canvas_options
+		base_doctype: Base DocType (starting node)
+
+	Returns:
+		Canvas configuration with nodes and edges
+	"""
+	import json
+
+	option_data = json.loads(option) if isinstance(option, str) else option
+	path = option_data["path"]
+	path_edges = option_data["edges"]
+
+	# Create node configurations
+	nodes = []
+	node_id_counter = 1
+	doctype_to_node_id = {}
+
+	# Horizontal layout: space nodes 350px apart
+	x_spacing = 350
+	y_position = 200
+
+	for idx, doctype in enumerate(path):
+		node_id = f"node_{node_id_counter}"
+		doctype_to_node_id[doctype] = node_id
+		node_id_counter += 1
+
+		nodes.append({
+			"id": node_id,
+			"doctype": doctype,
+			"x": 100 + (idx * x_spacing),
+			"y": y_position,
+		})
+
+	# Create edge configurations
+	edges = []
+	for edge_data in path_edges:
+		# Edge structure has "from" and "to" fields
+		src_doctype = edge_data["from"]
+		tgt_doctype = edge_data["to"]
+
+		# Get node IDs
+		src_node_id = doctype_to_node_id.get(src_doctype)
+		tgt_node_id = doctype_to_node_id.get(tgt_doctype)
+
+		if not src_node_id or not tgt_node_id:
+			continue
+
+		# Get field names from edge data (already has src_field and tgt_field)
+		src_field = edge_data.get("src_field", "name")
+		tgt_field = edge_data.get("tgt_field", "name")
+
+		# Auto-select important fields from target DocType
+		selected_fields = _auto_select_fields(tgt_doctype, max_fields=5)
+
+		edges.append({
+			"src_node_id": src_node_id,
+			"tgt_node_id": tgt_node_id,
+			"src_field": src_field,
+			"tgt_field": tgt_field,
+			"selected_fields": selected_fields,
+		})
+
+	return {
+		"base_doctype": base_doctype,
+		"nodes": nodes,
+		"edges": edges,
+	}
+
+
+@frappe.whitelist()
+def genbi_chat(query: str, session_id: str, base_doctype: str) -> dict:
+	"""
+	AI conversational endpoint for Generative BI.
+
+	Provides multi-turn conversation with intent classification, entity resolution,
+	relationship explanation, and auto-canvas building.
+
+	Args:
+	    query: User's natural language query
+	    session_id: Unique session ID for conversation continuity
+	    base_doctype: Starting DocType (current Excel View DocType)
+
+	Returns:
+	    {
+	        "intent": str,
+	        "response": {
+	            "type": "text" | "paths" | "canvas_config" | "explanation" | "data_insight",
+	            "content": ...,
+	            "followup_suggestions": [str]
+	        },
+	        "conversation_history": [...],
+	        "needs_disambiguation": bool,
+	        "disambiguation_options": [str]
+	    }
+	"""
+	import json
+
+	from excel_view.genbi.conversation import ConversationState
+	from excel_view.genbi.data_insights import DataInsights
+	from excel_view.genbi.entity_resolver import EntityResolver
+	from excel_view.genbi.explainer import RelationshipExplainer
+	from excel_view.genbi.intent_classifier import IntentClassifier
+	from excel_view.genbi.query_parser import QueryParser
+
+	# Load conversation state
+	conv = ConversationState.load(session_id, base_doctype)
+
+	# Classify intent
+	classifier = IntentClassifier()
+	intent, intent_confidence = classifier.classify(query, conv.context)
+
+	# Extract entities
+	resolver = EntityResolver()
+	entities = resolver.extract_entities(query, conv.context)
+
+	# Add user turn to conversation
+	conv.add_turn(role="user", message=query, intent=intent, entities=entities)
+
+	response = {}
+	needs_disambiguation = False
+	disambiguation_options = []
+
+	# ===== INTENT ROUTING =====
+
+	# 1. FIND_PATH - Find join paths from base to target
+	if intent == "FIND_PATH":
+		if not entities:
+			response = {
+				"type": "text",
+				"content": f"I couldn't identify a target DocType from your query. Current DocType: **{base_doctype}**. Try asking 'to Customer' or 'connect to Sales Order'.",
+				"followup_suggestions": [
+					"What can I join?",
+					"Show me common connections",
+					"Suggest DocTypes",
+				],
+			}
+		elif len(entities) > 1 and entities[0].get("alternatives"):
+			# Needs disambiguation
+			needs_disambiguation = True
+			disambiguation_options = [entities[0]["doctype"]] + entities[0]["alternatives"]
+			response = {
+				"type": "text",
+				"content": f"I found multiple matches for your query. Which DocType did you mean?",
+				"followup_suggestions": [],
+			}
+		else:
+			# Find paths using existing generate_canvas_options
+			target_entity = entities[0]["doctype"]
+			path_result = generate_canvas_options(target_entity, base_doctype)
+
+			if not path_result.get("options"):
+				response = {
+					"type": "text",
+					"content": f"No connection found from **{base_doctype}** to **{target_entity}**. They may not be related via Link fields.",
+					"followup_suggestions": [
+						"What can I join?",
+						"Show me common connections",
+					],
+				}
+			else:
+				# Add data insights to paths
+				insights_engine = DataInsights()
+				options_with_insights = []
+
+				for option in path_result["options"][:10]:  # Top 10 paths only
+					path = option["path"]
+					edges = option["edges"]
+
+					# Check data availability
+					data_check = insights_engine.check_path_data(path, edges)
+
+					# Add insights to option
+					option["data_insights"] = data_check
+					options_with_insights.append(option)
+
+				# Store paths in context for follow-up
+				conv.context["last_paths"] = options_with_insights
+				conv.context["follow_up_mode"] = "explain"
+
+				response = {
+					"type": "paths",
+					"content": {
+						"base_doctype": base_doctype,
+						"target_doctype": target_entity,
+						"paths": options_with_insights,
+						"total": len(path_result["options"]),
+						"showing": len(options_with_insights),
+					},
+					"followup_suggestions": [
+						"Explain the first path",
+						"Which path is best?",
+						"Build canvas from top path",
+						"Show me more paths",
+					],
+				}
+
+	# 2. EXPLAIN - Explain relationships
+	elif intent == "EXPLAIN":
+		last_paths = conv.context.get("last_paths", [])
+
+		if not last_paths:
+			response = {
+				"type": "text",
+				"content": "I don't have any paths to explain yet. Try asking 'connect to Customer' first, then ask me to explain it.",
+				"followup_suggestions": ["Find path to Customer", "Connect to Sales Order"],
+			}
+		else:
+			# Explain the first path
+			explainer = RelationshipExplainer()
+			path_to_explain = last_paths[0]
+
+			explanation = explainer.explain_path(
+				path=path_to_explain["path"], edges_metadata=path_to_explain["edges"]
+			)
+
+			# If multiple paths, compare them
+			comparison = None
+			if len(last_paths) > 1:
+				comparison = explainer.compare_paths(last_paths[0], last_paths[1])
+
+			conv.context["follow_up_mode"] = "build"
+
+			response = {
+				"type": "explanation",
+				"content": {
+					"path": path_to_explain["path"],
+					"explanation": explanation,
+					"comparison": comparison,
+				},
+				"followup_suggestions": [
+					"Build this canvas",
+					"Show me a different path",
+					"Why is this connection useful?",
+				],
+			}
+
+	# 3. BUILD_CANVAS - Auto-build canvas from complex query
+	elif intent == "BUILD_CANVAS":
+		# Check if user wants to build from last explained path
+		last_paths = conv.context.get("last_paths", [])
+
+		if not entities and last_paths and query.lower().strip() in ["build this canvas", "build it", "build this", "create canvas"]:
+			# Use the first path from last_paths (most recently explained)
+			best_option = last_paths[0]
+			canvas_config = build_canvas_from_option(
+				json.dumps(best_option), base_doctype
+			)
+
+			conv.context["canvas_state"] = canvas_config
+			conv.context["follow_up_mode"] = "refine"
+
+			response = {
+				"type": "canvas_config",
+				"content": {
+					"canvas": canvas_config,
+					"parsed_query": None,
+				},
+				"followup_suggestions": [
+					"Add more fields",
+					"Show different path",
+				],
+			}
+		else:
+			# Try complex query parsing
+			parser = QueryParser()
+			parsed = parser.parse(query, base_doctype)
+
+			if not parsed or parsed["confidence"] < 0.4:
+				# Fallback: try simple path finding
+				if entities:
+					response = {
+						"type": "text",
+						"content": f"I couldn't fully parse your query. Did you want to find paths to **{entities[0]['doctype']}**?",
+						"followup_suggestions": [
+							f"Connect to {entities[0]['doctype']}",
+							"Show me common connections",
+						],
+					}
+				else:
+					response = {
+						"type": "text",
+						"content": "I couldn't understand your query. Try something like: 'employee salary with deductions grouped by department'.",
+						"followup_suggestions": [
+							"Show me examples",
+							"What can I build?",
+						],
+					}
+			else:
+				# Build canvas from parsed query
+				# For now, use existing build_canvas_from_option with best path
+				target_entity = parsed["entities"][-1] if len(parsed["entities"]) > 1 else None
+
+				if target_entity:
+					path_result = generate_canvas_options(target_entity, base_doctype)
+
+					if path_result.get("options"):
+						best_option = path_result["options"][0]
+						canvas_config = build_canvas_from_option(
+							json.dumps(best_option), base_doctype
+						)
+
+						# Add parsed fields/filters to canvas
+						# (This would require canvas config modification - future enhancement)
+
+						conv.context["canvas_state"] = canvas_config
+						conv.context["follow_up_mode"] = "refine"
+
+						response = {
+							"type": "canvas_config",
+							"content": {
+							"canvas": canvas_config,
+							"parsed_query": parsed,
+						},
+						"followup_suggestions": [
+							"Add more fields",
+							"Apply filters",
+							"Change grouping",
+						],
+					}
+				else:
+					response = {
+						"type": "text",
+						"content": f"Could not find a connection from **{base_doctype}** to **{target_entity}**.",
+						"followup_suggestions": ["What can I join?"],
+					}
+
+	# 4. ANALYZE_DATA - Data insights
+	elif intent == "ANALYZE_DATA":
+		insights_engine = DataInsights()
+
+		if entities:
+			# Check row count for mentioned DocType
+			target_dt = entities[0]["doctype"]
+			try:
+				row_count = frappe.db.count(target_dt)
+				filters = insights_engine.suggest_filters(target_dt)
+
+				response = {
+					"type": "data_insight",
+					"content": {
+						"doctype": target_dt,
+						"row_count": row_count,
+						"suggested_filters": filters,
+					},
+					"followup_suggestions": [
+						f"Connect to {target_dt}",
+						"Show me field details",
+					],
+				}
+			except Exception as e:
+				response = {
+					"type": "text",
+					"content": f"Could not analyze **{target_dt}**: {str(e)}",
+					"followup_suggestions": ["Try a different DocType"],
+				}
+		else:
+			# General data check for base DocType
+			try:
+				row_count = frappe.db.count(base_doctype)
+				response = {
+					"type": "data_insight",
+					"content": {
+						"doctype": base_doctype,
+						"row_count": row_count,
+					},
+					"followup_suggestions": [
+						"What can I join?",
+						"Show common connections",
+					],
+				}
+			except Exception as e:
+				response = {
+					"type": "text",
+					"content": f"Could not analyze data: {str(e)}",
+					"followup_suggestions": [],
+				}
+
+	# 5. SUGGEST - Suggest connections
+	elif intent == "SUGGEST":
+		# Find all direct connections from base_doctype
+		import networkx as nx
+
+		G = nx.Graph()
+		edges_list = _get_all_link_edges()
+
+		for e in edges_list:
+			G.add_edge(e["doctype"], e["target"], **e)
+
+		if base_doctype in G:
+			neighbors = list(G.neighbors(base_doctype))[:10]  # Top 10
+
+			response = {
+				"type": "text",
+				"content": f"**{base_doctype}** can be connected to: {', '.join(neighbors)}",
+				"followup_suggestions": [f"Connect to {n}" for n in neighbors[:3]],
+			}
+		else:
+			response = {
+				"type": "text",
+				"content": f"**{base_doctype}** has no direct Link field connections.",
+				"followup_suggestions": [],
+			}
+
+	# 6. REFINE - Refine previous results
+	elif intent == "REFINE":
+		last_paths = conv.context.get("last_paths", [])
+
+		if not last_paths:
+			response = {
+				"type": "text",
+				"content": "Nothing to refine yet. Try finding some paths first!",
+				"followup_suggestions": ["Connect to Customer", "What can I join?"],
+			}
+		else:
+			# Simple refinement: show next 10 paths
+			start_idx = len(last_paths)
+			# This would need to store all paths, not just top 10
+			response = {
+				"type": "text",
+				"content": "Refinement coming soon! For now, I'm showing you the top paths.",
+				"followup_suggestions": [
+					"Explain first path",
+					"Build canvas",
+				],
+			}
+
+	# Default fallback
+	else:
+		response = {
+			"type": "text",
+			"content": f"I understood your intent as **{intent}** but I'm not sure how to help. Try asking 'connect to Customer' or 'what can I join?'",
+			"followup_suggestions": [
+				"What can I join?",
+				"Connect to Customer",
+			],
+		}
+
+	# Add bot response to conversation
+	conv.add_turn(role="bot", message=response)
+	conv.save()
+
+	return {
+		"intent": intent,
+		"intent_confidence": intent_confidence,
+		"response": response,
+		"conversation_history": conv.get_recent_context(n=5),
+		"needs_disambiguation": needs_disambiguation,
+		"disambiguation_options": disambiguation_options,
+	}
+
+
