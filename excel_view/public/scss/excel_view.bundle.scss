@@ -12,39 +12,39 @@
 
 .ev-page {
 	// Excel's signature green — used for toolbar accent ONLY
-	--ev-green:         #1d6f42;
-	--ev-green-dark:    #185c37;
-	--ev-green-light:   #e2efda;
+	--ev-green: #1d6f42;
+	--ev-green-dark: #185c37;
+	--ev-green-light: #e2efda;
 
 	// Grid
-	--ev-header-bg:     #f3f3f3;       // col/row header fill (light gray)
-	--ev-header-text:   #404040;       // header text
-	--ev-header-border: #d4d4d4;       // header separator (plain gray — no green!)
-	--ev-grid-line:     #d4d4d4;       // inner cell border
-	--ev-cell-bg:       #ffffff;
+	--ev-header-bg: #f3f3f3; // col/row header fill (light gray)
+	--ev-header-text: #404040; // header text
+	--ev-header-border: #d4d4d4; // header separator (plain gray — no green!)
+	--ev-grid-line: #d4d4d4; // inner cell border
+	--ev-cell-bg: #ffffff;
 
 	// Text
-	--ev-text:          #1a1a1a;
-	--ev-text-muted:    #767676;
+	--ev-text: #1a1a1a;
+	--ev-text-muted: #767676;
 
 	// Excel selection (blue, not green)
-	--ev-sel-border:    #1264a3;
-	--ev-sel-fill:      #deebf7;       // solid Excel selection blue tint
-	--ev-sel-range:     rgba(18, 100, 163, 0.09);
+	--ev-sel-border: #1264a3;
+	--ev-sel-fill: #deebf7; // solid Excel selection blue tint
+	--ev-sel-range: rgba(18, 100, 163, 0.09);
 
 	// Formula bar
-	--ev-fb-bg:         #ffffff;
-	--ev-fb-border:     #d4d4d4;
-	--ev-fb-height:     28px;
+	--ev-fb-bg: #ffffff;
+	--ev-fb-border: #d4d4d4;
+	--ev-fb-height: 28px;
 
 	// Read-only
-	--ev-dimmed-bg:     #f8f8f8;
-	--ev-dimmed-text:   #a0a0a0;
+	--ev-dimmed-bg: #f8f8f8;
+	--ev-dimmed-text: #a0a0a0;
 
 	// Fonts — Calibri (Office), then system
-	--ev-font:          Calibri, "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
-	--ev-font-size:     12px;
-	--ev-font-mono:     Consolas, "Cascadia Code", "Courier New", monospace;
+	--ev-font: Calibri, "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+	--ev-font-size: 12px;
+	--ev-font-mono: Consolas, "Cascadia Code", "Courier New", monospace;
 }
 
 // ── Page container ────────────────────────────────────────────────────────────
@@ -55,7 +55,9 @@
 		flex-direction: column;
 		height: calc(100vh - 120px);
 		overflow: hidden;
-		background: var(--ev-cell-bg);
+		// NO backdrop-filter here — it would make .frappe-list the containing block
+		// for position:fixed children (HOT's manualColumnResizer etc.), breaking their positioning.
+		padding: 0;
 	}
 
 	.list-paging-area .comparison-message {
@@ -169,7 +171,7 @@
 
 .ev-grid-wrapper {
 	flex: 1 1 auto;
-	min-height: 0;          // allow flex shrink below content size
+	min-height: 0; // allow flex shrink below content size
 	overflow: hidden;
 	position: relative;
 	display: flex;
@@ -177,9 +179,10 @@
 
 	.ev-hot-container {
 		flex: 1 1 auto;
-		min-height: 0;      // required so HOT shrinks properly inside flex
+		min-height: 0; // required so HOT shrinks properly inside flex
 		width: 100%;
 		overflow: hidden;
+		position: relative; // anchor for .ev-inline-insert-bar absolute positioning
 	}
 
 	// Default vertical alignment for all data cells
@@ -197,9 +200,10 @@
 
 	// ── All base cells ────────────────────────────────────────────────────────
 	td {
-		background-color: var(--ev-cell-fill, var(--ev-cell-bg));
+		background-color: #d7d0d0;
+		background-image: linear-gradient(rgba(179, 163, 23, 0.37), var(--ev-sel-range));
 		color: var(--ev-text);
-		border-color: var(--ev-grid-line) !important;
+		border-color: var(--ev-grid-line);  // no !important — inline style borders must win
 		padding: 0 4px;
 		line-height: 20px;
 	}
@@ -250,14 +254,14 @@
 	.current {
 		outline: 2px solid var(--ev-sel-border) !important;
 		outline-offset: -2px;
-		background-color: var(--ev-cell-fill, var(--ev-cell-bg)) !important;
+		background-color: var(--ev-cell-fill, var(--ev-sel-fill)) !important;
 	}
 
 	// ── Selection range — fill colour preserved, tint applied as image overlay ──
 	td.area,
 	.area {
-		background-color: var(--ev-cell-fill, var(--ev-cell-bg)) !important;
-		background-image: linear-gradient(var(--ev-sel-range), var(--ev-sel-range)) !important;
+		background-color: #d7d0d0 !important;
+		background-image: linear-gradient(rgba(179, 163, 23, 0.37), var(--ev-sel-range)) !important;
 	}
 
 	// ── Read-only / dimmed ────────────────────────────────────────────────────
@@ -271,7 +275,7 @@
 	td.ev-name-col {
 		font-family: var(--ev-font-mono);
 		font-size: 11px;
-		color: #0563c1;  // Excel hyperlink blue
+		color: #0563c1; // Excel hyperlink blue
 	}
 
 	// ── Currency / numeric ────────────────────────────────────────────────────
@@ -310,7 +314,7 @@
 
 	// ── Context menu ─────────────────────────────────────────────────────────
 	.htContextMenu table.htCore {
-		border: 1px solid #c8c8c8;
+		border: 1px solid var(--border-color);
 		border-radius: 2px;
 		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.14);
 		font-size: 12px;
@@ -338,7 +342,9 @@
 
 	// ── Column resize handle ──────────────────────────────────────────────────
 	.manualColumnResizer {
-		background: var(--ev-sel-border) !important;
+		background: #217346 !important;
+		width: 2px !important;
+		margin-left: 4px;
 	}
 }
 
@@ -346,7 +352,7 @@
 
 .ev-link-dropdown {
 	background: #ffffff;
-	border: 1px solid #c8c8c8;
+	border: 1px solid var(--border-color);
 	border-radius: 2px;
 	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
 	max-height: 200px;
@@ -410,7 +416,9 @@
 	overflow-y: hidden;
 	scrollbar-width: none;
 
-	&::-webkit-scrollbar { display: none; }
+	&::-webkit-scrollbar {
+		display: none;
+	}
 }
 
 .ev-tb-group {
@@ -449,8 +457,15 @@
 	gap: 1px;
 	transition: background 0.1s, border-color 0.1s;
 
-	b { font-weight: 900; font-style: normal; }
-	i { font-style: italic; font-weight: 700; }
+	b {
+		font-weight: 900;
+		font-style: normal;
+	}
+
+	i {
+		font-style: italic;
+		font-weight: 700;
+	}
 
 	&:hover {
 		background: rgba(0, 0, 0, 0.07);
@@ -464,8 +479,13 @@
 	}
 }
 
-.ev-btn-underline { text-decoration: underline; }
-.ev-btn-strike    { text-decoration: line-through; }
+.ev-btn-underline {
+	text-decoration: underline;
+}
+
+.ev-btn-strike {
+	text-decoration: line-through;
+}
 
 // ── Toolbar dropdowns ──────────────────────────────────────────────────────────
 
@@ -486,8 +506,13 @@
 	}
 }
 
-.ev-tb-font-family { width: 110px; }
-.ev-tb-font-size   { width: 46px; }
+.ev-tb-font-family {
+	width: 110px;
+}
+
+.ev-tb-font-size {
+	width: 46px;
+}
 
 // ── Color buttons ──────────────────────────────────────────────────────────────
 
@@ -503,7 +528,9 @@
 	line-height: 1;
 }
 
-.ev-bucket { font-size: 14px; }
+.ev-bucket {
+	font-size: 14px;
+}
 
 .ev-tb-color-bar {
 	display: block;
@@ -529,14 +556,36 @@
 		border-radius: 1px;
 	}
 
-	&::before { width: 100%; }
+	&::before {
+		width: 100%;
+	}
 
-	&.ev-align-left   { &::after { width: 60%; } }
-	&.ev-align-center { align-items: center; &::after { width: 60%; } }
-	&.ev-align-right  { align-items: flex-end; &::after { width: 60%; } }
+	&.ev-align-left {
+		&::after {
+			width: 60%;
+		}
+	}
+
+	&.ev-align-center {
+		align-items: center;
+
+		&::after {
+			width: 60%;
+		}
+	}
+
+	&.ev-align-right {
+		align-items: flex-end;
+
+		&::after {
+			width: 60%;
+		}
+	}
 }
 
-.ev-wrap-icon { font-size: 14px; }
+.ev-wrap-icon {
+	font-size: 14px;
+}
 
 // ── Workbook toolbar group (Save View / Views) ────────────────────────────────
 
@@ -546,8 +595,8 @@
 
 // Split save button container: [💾 Save View] [▾]
 .ev-wb-save-wrap {
-	display:  flex;
-	position: relative;   // dropdown positions against this
+	display: flex;
+	position: relative; // dropdown positions against this
 
 	.ev-wb-save-btn {
 		flex-direction: row;
@@ -558,21 +607,50 @@
 		font-weight: 500;
 		font-size: 11px;
 		border-right: none;
+		position: relative;
 
-		svg { flex-shrink: 0; color: var(--ev-green); }
+		// SVG must be white in the green QA bar — override any inherited color
+		svg {
+			flex-shrink: 0;
+			color: #fff;
+			fill: #fff;
+		}
+
+		// Unsaved changes dot — amber pulse appears when workbook has pending saves
+		&--dirty::after {
+			content: "";
+			position: absolute;
+			top: 5px;
+			right: 4px;
+			width: 7px;
+			height: 7px;
+			background: #FFD600;
+			border-radius: 50%;
+			border: 1.5px solid rgba(255, 255, 255, 0.6);
+			animation: ev-unsaved-pulse 1.8s ease-in-out infinite;
+		}
+	}
+
+	@keyframes ev-unsaved-pulse {
+		0%, 100% { opacity: 1; transform: scale(1); }
+		50%       { opacity: 0.55; transform: scale(0.8); }
 	}
 
 	// Deselect × — visible only when a workbook is active
 	.ev-wb-deselect-btn {
 		border-radius: 0;
-		border-left:   none;
-		border-right:  none;
-		min-width:     18px;
-		padding:       0 4px;
-		font-size:     13px;
-		line-height:   1;
-		color:         var(--ev-text-muted);
-		&:hover { color: #c0392b; background: #fde8e8; }
+		border-left: none;
+		border-right: none;
+		min-width: 18px;
+		padding: 0 4px;
+		font-size: 13px;
+		line-height: 1;
+		color: var(--ev-text-muted);
+
+		&:hover {
+			color: #c0392b;
+			background: #fde8e8;
+		}
 	}
 
 	.ev-wb-dropdown-arrow {
@@ -586,31 +664,33 @@
 
 // Dropdown menu that appears below the ▾ arrow
 .ev-wb-dropdown {
-	position:   absolute;
-	top:        calc(100% + 3px);
-	left:       0;
-	min-width:  130px;
+	position: absolute;
+	top: calc(100% + 3px);
+	left: 0;
+	min-width: 130px;
 	background: #ffffff;
-	border:     1px solid #c8c8c8;
+	border: 1px solid #c8c8c8;
 	border-radius: 3px;
 	box-shadow: 2px 4px 8px rgba(0, 0, 0, 0.14);
-	z-index:    1200;
-	padding:    3px 0;
+	z-index: 1200;
+	padding: 3px 0;
 
 	.ev-wb-dd-item {
-		display:     block;
-		width:       100%;
-		text-align:  left;
-		background:  transparent;
-		border:      none;
-		padding:     5px 12px;
-		font-size:   12px;
+		display: block;
+		width: 100%;
+		text-align: left;
+		background: transparent;
+		border: none;
+		padding: 5px 12px;
+		font-size: 12px;
 		font-family: var(--ev-font);
-		color:       var(--ev-text);
-		cursor:      pointer;
+		color: var(--ev-text);
+		cursor: pointer;
 		white-space: nowrap;
 
-		&:hover { background: #e8f2ff; }
+		&:hover {
+			background: #e8f2ff;
+		}
 	}
 }
 
@@ -622,20 +702,25 @@
 	min-width: unset;
 	font-size: 11px;
 
-	svg { flex-shrink: 0; color: var(--ev-text-muted); }
+	svg {
+		flex-shrink: 0;
+		color: var(--ev-text-muted);
+	}
 }
 
 // ── Open View dialog — workbook list ─────────────────────────────────────────
 
 .ev-wb-section-label {
-	font-size:      10px;
-	font-weight:    600;
+	font-size: 10px;
+	font-weight: 600;
 	text-transform: uppercase;
 	letter-spacing: 0.06em;
-	color:          var(--ev-text-muted);
-	padding:        10px 4px 4px;
+	color: var(--ev-text-muted);
+	padding: 10px 4px 4px;
 
-	&:first-child { padding-top: 4px; }
+	&:first-child {
+		padding-top: 4px;
+	}
 }
 
 .ev-wb-list {
@@ -645,37 +730,57 @@
 }
 
 .ev-wb-row {
-	display:     flex;
+	display: flex;
 	align-items: center;
-	gap:         8px;
-	padding:     7px 10px;
+	gap: 8px;
+	padding: 7px 10px;
 	border-radius: 4px;
-	cursor:      pointer;
-	transition:  background 0.1s;
+	cursor: pointer;
+	transition: background 0.1s;
 
-	&:hover { background: #f0f6ff; }
+	&:hover {
+		background: #f0f6ff;
+	}
 
-	.ev-wb-row-icon   { color: var(--ev-green); flex-shrink: 0; }
-	.ev-wb-row-title  { flex: 1; font-size: 13px; font-weight: 500; }
-	.ev-wb-row-date   { font-size: 11px; color: var(--ev-text-muted); white-space: nowrap; }
+	.ev-wb-row-icon {
+		color: var(--ev-green);
+		flex-shrink: 0;
+	}
+
+	.ev-wb-row-title {
+		flex: 1;
+		font-size: 13px;
+		font-weight: 500;
+	}
+
+	.ev-wb-row-date {
+		font-size: 11px;
+		color: var(--ev-text-muted);
+		white-space: nowrap;
+	}
 
 	.ev-wb-row-del {
 		flex-shrink: 0;
-		background:  transparent;
-		border:      none;
-		color:       var(--ev-text-muted);
-		font-size:   11px;
-		cursor:      pointer;
-		padding:     2px 5px;
+		background: transparent;
+		border: none;
+		color: var(--ev-text-muted);
+		font-size: 11px;
+		cursor: pointer;
+		padding: 2px 5px;
 		border-radius: 3px;
-		opacity:     0;
-		transition:  opacity 0.15s, background 0.1s;
+		opacity: 0;
+		transition: opacity 0.15s, background 0.1s;
 		line-height: 1;
 
-		&:hover { background: #fde8e8; color: #c0392b; }
+		&:hover {
+			background: #fde8e8;
+			color: #c0392b;
+		}
 	}
 
-	&:hover .ev-wb-row-del { opacity: 1; }
+	&:hover .ev-wb-row-del {
+		opacity: 1;
+	}
 
 	// Active (currently loaded) workbook row
 	&.ev-wb-row--active {
@@ -683,21 +788,27 @@
 		border-left: 3px solid var(--ev-primary, #1a73e8);
 		padding-left: 7px; // compensate for border
 
-		.ev-wb-row-title { color: var(--ev-primary, #1a73e8); font-weight: 600; }
-		&:hover { background: #d8ecff; }
+		.ev-wb-row-title {
+			color: var(--ev-primary, #1a73e8);
+			font-weight: 600;
+		}
+
+		&:hover {
+			background: #d8ecff;
+		}
 	}
 
 	.ev-wb-active-check {
-		color:      var(--ev-primary, #1a73e8);
-		font-size:  14px;
+		color: var(--ev-primary, #1a73e8);
+		font-size: 14px;
 		font-weight: 700;
 		flex-shrink: 0;
 		line-height: 1;
 	}
 
 	.ev-wb-row-shared {
-		font-size:  10px;
-		color:      var(--ev-green);
+		font-size: 10px;
+		color: var(--ev-green);
 		font-weight: 600;
 		text-transform: uppercase;
 		letter-spacing: 0.05em;
@@ -706,10 +817,10 @@
 }
 
 .ev-wb-empty {
-	padding:    20px 10px;
+	padding: 20px 10px;
 	text-align: center;
-	color:      var(--ev-text-muted);
-	font-size:  13px;
+	color: var(--ev-text-muted);
+	font-size: 13px;
 	line-height: 1.6;
 }
 
@@ -729,7 +840,9 @@
 	-webkit-user-select: none;
 	user-select: none;
 
-	&.hide { display: none; }
+	&.hide {
+		display: none;
+	}
 }
 
 // ── Section container + label ─────────────────────────────────────────────────
@@ -763,7 +876,9 @@
 
 // Recent section shown/hidden dynamically
 .ev-pal-recent-wrap {
-	&.hide { display: none; }
+	&.hide {
+		display: none;
+	}
 }
 
 // ── Individual swatch — flat Windows 7 style (no scale transform) ─────────────
@@ -805,7 +920,9 @@
 		color: #003e6b;
 	}
 
-	&:focus { outline: 1px dotted #666; }
+	&:focus {
+		outline: 1px dotted #666;
+	}
 }
 
 // ── Custom color expand panel ─────────────────────────────────────────────────
@@ -817,7 +934,9 @@
 	padding: 5px 1px 1px;
 	border-top: 1px solid #d8d8d8;
 
-	&.hide { display: none; }
+	&.hide {
+		display: none;
+	}
 
 	.ev-custom-color {
 		width: 22px;
@@ -841,7 +960,9 @@
 		color: #1a1a1a;
 		background: #fff;
 
-		&:focus { border-color: #0078d7; }
+		&:focus {
+			border-color: #0078d7;
+		}
 	}
 
 	.ev-hex-apply-btn {
@@ -869,6 +990,7 @@
 // users can reference columns in formulas like =SUM(B1:B10).
 
 .ev-page .handsontable {
+
 	thead th,
 	.htColHeader,
 	.ht_clone_top th,
@@ -908,6 +1030,7 @@
 // We override that so the ▼ is always visible on every column header.
 
 .ev-page .handsontable {
+
 	// HOT's .relative div inside <th> has overflow:hidden by default.
 	// This clips the absolutely-positioned .changeType ▼ button.
 	// Fix: make .relative fill the full header height and allow overflow.
@@ -923,7 +1046,7 @@
 	thead th .relative .changeType {
 		opacity: 1 !important;
 		visibility: visible !important;
-		transform: none !important;       // cancel HOT's translateY(-50%)
+		transform: none !important; // cancel HOT's translateY(-50%)
 		position: absolute !important;
 		top: 4px !important;
 		right: 2px !important;
@@ -949,9 +1072,18 @@
 	// Filter active: blue tint on column header when filter is applied
 	.ht_clone_top th.htFiltersActive {
 		background: #dbeafe !important;
-		.ev-col-letter { color: var(--ev-sel-border); }
-		.ev-col-name   { color: var(--ev-sel-border); }
-		.changeType    { color: var(--ev-sel-border) !important; }
+
+		.ev-col-letter {
+			color: var(--ev-sel-border);
+		}
+
+		.ev-col-name {
+			color: var(--ev-sel-border);
+		}
+
+		.changeType {
+			color: var(--ev-sel-border) !important;
+		}
 	}
 
 	// The filter/sort dropdown panel — must float above HOT overlay clones
@@ -992,7 +1124,9 @@
 	max-width: calc(100vw - 32px);
 	font-family: var(--ev-font);
 
-	&.hide { display: none; }
+	&.hide {
+		display: none;
+	}
 }
 
 .ev-fh-header {
@@ -1020,7 +1154,9 @@
 	color: var(--ev-text-muted);
 	padding: 0 4px;
 
-	&:hover { color: var(--ev-text); }
+	&:hover {
+		color: var(--ev-text);
+	}
 }
 
 .ev-fh-body {
@@ -1054,7 +1190,9 @@
 	border-radius: 3px;
 	cursor: pointer;
 
-	&:hover { background: var(--ev-green-light); }
+	&:hover {
+		background: var(--ev-green-light);
+	}
 }
 
 .ev-fh-formula {
@@ -1087,18 +1225,18 @@
 // Dark mode is already working — preserve it as-is.
 
 [data-theme="dark"] .ev-page {
-	--ev-header-bg:     #2d2d2d;
-	--ev-header-text:   #a0a0a0;
+	--ev-header-bg: #2d2d2d;
+	--ev-header-text: #a0a0a0;
 	--ev-header-border: #444444;
-	--ev-grid-line:     #3a3a3a;
-	--ev-cell-bg:       #1e1e1e;
-	--ev-text:          #d4d4d4;
-	--ev-text-muted:    #737373;
-	--ev-dimmed-bg:     #252525;
-	--ev-dimmed-text:   #666666;
-	--ev-fb-bg:         #1e1e1e;
-	--ev-fb-border:     #444444;
-	--ev-sel-range:     rgba(18, 100, 163, 0.18);
+	--ev-grid-line: #3a3a3a;
+	--ev-cell-bg: #1e1e1e;
+	--ev-text: #d4d4d4;
+	--ev-text-muted: #737373;
+	--ev-dimmed-bg: #252525;
+	--ev-dimmed-text: #666666;
+	--ev-fb-bg: #1e1e1e;
+	--ev-fb-border: #444444;
+	--ev-sel-range: rgba(18, 100, 163, 0.18);
 }
 
 [data-theme="dark"] {
@@ -1115,38 +1253,74 @@
 
 	.ev-tb-btn {
 		color: #d4d4d4;
-		&:hover { background: rgba(255, 255, 255, 0.08); border-color: #555; }
-		&.ev-active { background: rgba(18, 100, 163, 0.22); border-color: #1264a3; color: #4fc1e9; }
+
+		&:hover {
+			background: rgba(255, 255, 255, 0.08);
+			border-color: #555;
+		}
+
+		&.ev-active {
+			background: rgba(18, 100, 163, 0.22);
+			border-color: #1264a3;
+			color: #4fc1e9;
+		}
 	}
 
 	// ── Workbook toolbar + dialog — dark mode ──────────────────────────────
 	.ev-wb-dropdown {
-		background:   #252525;
+		background: #252525;
 		border-color: #555;
-		box-shadow:   2px 4px 8px rgba(0, 0, 0, 0.4);
+		box-shadow: 2px 4px 8px rgba(0, 0, 0, 0.4);
 
 		.ev-wb-dd-item {
 			color: #d4d4d4;
-			&:hover { background: #1d3a4f; color: #4fc1e9; }
+
+			&:hover {
+				background: #1d3a4f;
+				color: #4fc1e9;
+			}
 		}
 	}
 
 	.ev-wb-row {
-		&:hover { background: rgba(255, 255, 255, 0.06); }
-		.ev-wb-row-title { color: #d4d4d4; }
-		.ev-wb-row-del:hover { background: #3a1818; color: #e06c6c; }
+		&:hover {
+			background: rgba(255, 255, 255, 0.06);
+		}
+
+		.ev-wb-row-title {
+			color: #d4d4d4;
+		}
+
+		.ev-wb-row-del:hover {
+			background: #3a1818;
+			color: #e06c6c;
+		}
 
 		&.ev-wb-row--active {
-			background:   rgba(74, 144, 226, 0.15);
+			background: rgba(74, 144, 226, 0.15);
 			border-color: #4a90e2;
-			.ev-wb-row-title { color: #4a90e2; }
-			&:hover { background: rgba(74, 144, 226, 0.22); }
+
+			.ev-wb-row-title {
+				color: #4a90e2;
+			}
+
+			&:hover {
+				background: rgba(74, 144, 226, 0.22);
+			}
 		}
-		.ev-wb-active-check { color: #4a90e2; }
+
+		.ev-wb-active-check {
+			color: #4a90e2;
+		}
 	}
 
-	.ev-wb-section-label { color: #666; }
-	.ev-wb-empty         { color: #666; }
+	.ev-wb-section-label {
+		color: #666;
+	}
+
+	.ev-wb-empty {
+		color: #666;
+	}
 
 	.ev-palette-popup {
 		background: #252525;
@@ -1154,17 +1328,29 @@
 		box-shadow: 3px 3px 7px rgba(0, 0, 0, 0.5);
 	}
 
-	.ev-pal-label { color: #c0c0c0; }
-	.ev-pal-rule  { background: #444; }
+	.ev-pal-label {
+		color: #c0c0c0;
+	}
+
+	.ev-pal-rule {
+		background: #444;
+	}
 
 	.ev-swatch {
 		border-color: rgba(255, 255, 255, 0.15);
-		&:hover { outline-color: #4fc1e9; }
+
+		&:hover {
+			outline-color: #4fc1e9;
+		}
 	}
 
 	.ev-pal-more-btn {
 		color: #d4d4d4;
-		&:hover { background: #1d3a4f; color: #4fc1e9; }
+
+		&:hover {
+			background: #1d3a4f;
+			color: #4fc1e9;
+		}
 	}
 
 	.ev-pal-custom-panel {
@@ -1174,14 +1360,22 @@
 			background: #1e1e1e;
 			border-color: #555;
 			color: #d4d4d4;
-			&:focus { border-color: #4fc1e9; }
+
+			&:focus {
+				border-color: #4fc1e9;
+			}
 		}
 
 		.ev-hex-apply-btn {
 			background: linear-gradient(to bottom, #3a3a3a, #2d2d2d);
 			border-color: #555;
 			color: #d4d4d4;
-			&:hover { background: linear-gradient(to bottom, #1d3a4f, #1a3040); border-color: #4fc1e9; color: #4fc1e9; }
+
+			&:hover {
+				background: linear-gradient(to bottom, #1d3a4f, #1a3040);
+				border-color: #4fc1e9;
+				color: #4fc1e9;
+			}
 		}
 	}
 
@@ -1190,18 +1384,48 @@
 		border-color: #444;
 	}
 
-	.ev-fh-header { background: #2d2d2d; border-color: #444; }
-	.ev-fh-title { color: #d4d4d4; }
-	.ev-fh-close { color: #737373; &:hover { color: #d4d4d4; } }
-	.ev-fh-formula { color: #4ec9b0; }
-	.ev-fh-row:hover { background: #1d3829; }
-	.ev-fh-tip { background: #1d3829; color: #4ec9b0; border-color: #4ec9b0; }
-	.ev-fh-category { border-color: #1d3829; }
+	.ev-fh-header {
+		background: #2d2d2d;
+		border-color: #444;
+	}
+
+	.ev-fh-title {
+		color: #d4d4d4;
+	}
+
+	.ev-fh-close {
+		color: #737373;
+
+		&:hover {
+			color: #d4d4d4;
+		}
+	}
+
+	.ev-fh-formula {
+		color: #4ec9b0;
+	}
+
+	.ev-fh-row:hover {
+		background: #1d3829;
+	}
+
+	.ev-fh-tip {
+		background: #1d3829;
+		color: #4ec9b0;
+		border-color: #4ec9b0;
+	}
+
+	.ev-fh-category {
+		border-color: #1d3829;
+	}
 
 	.ev-formula-bar {
 		.ev-fx-icon {
 			color: #4ec9b0;
-			sub { color: #4ec9b0; }
+
+			sub {
+				color: #4ec9b0;
+			}
 		}
 	}
 
@@ -1257,14 +1481,55 @@
 	line-height: 1.6;
 }
 
-.ev-doc-draft     { background: #f1f5f9; color: #475569; }
-.ev-doc-submitted { background: #dcfce7; color: #15803d; }
-.ev-doc-cancelled { background: #fee2e2; color: #b91c1c; }
+.ev-doc-draft {
+	background: #f1f5f9;
+	color: #475569;
+}
+
+.ev-doc-submitted {
+	background: #dcfce7;
+	color: #15803d;
+}
+
+.ev-doc-cancelled {
+	background: #fee2e2;
+	color: #b91c1c;
+}
 
 [data-theme="dark"] {
-	.ev-doc-draft     { background: #1e293b; color: #94a3b8; }
-	.ev-doc-submitted { background: #14532d; color: #86efac; }
-	.ev-doc-cancelled { background: #450a0a; color: #fca5a5; }
+	.ev-doc-draft {
+		background: #1e293b;
+		color: #94a3b8;
+	}
+
+	.ev-doc-submitted {
+		background: #14532d;
+		color: #86efac;
+	}
+
+	.ev-doc-cancelled {
+		background: #450a0a;
+		color: #fca5a5;
+	}
+
+	// V2.6 popups
+	.ev-border-popup {
+		background: #252525;
+		border-color: #444;
+		box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+	}
+	.ev-border-item {
+		color: #d4d4d4;
+		&:hover { background: #1d3829; color: #4ec9b0; }
+	}
+	.ev-merge-popup {
+		background: #252525;
+		border-color: #444;
+	}
+	.ev-merge-item {
+		color: #d4d4d4;
+		&:hover { background: #1d3829; color: #4ec9b0; }
+	}
 }
 
 // ── Toolbar: Choose Columns button ────────────────────────────────────────────
@@ -1273,7 +1538,6 @@
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	width: 28px;
 	height: 26px;
 	padding: 0;
 	color: var(--ev-green, #1d6f42);
@@ -1282,9 +1546,13 @@
 	background: transparent;
 	cursor: pointer;
 
-	&:hover { background: var(--ev-green-light, #e2efda); }
+	&:hover {
+		background: var(--ev-green-light, #e2efda);
+	}
 
-	svg { flex-shrink: 0; }
+	svg {
+		flex-shrink: 0;
+	}
 }
 
 // ── Field Picker: Apply button (Excel green override) ─────────────────────────
@@ -1293,7 +1561,8 @@
 	background-color: #1d6f42 !important;
 	border-color: #1d6f42 !important;
 
-	&:hover, &:focus {
+	&:hover,
+	&:focus {
 		background-color: #185c37 !important;
 		border-color: #185c37 !important;
 	}
@@ -1311,7 +1580,10 @@
 		gap: 8px;
 		margin-bottom: 6px;
 
-		.ev-fp-search { flex: 1; font-size: 13px; }
+		.ev-fp-search {
+			flex: 1;
+			font-size: 13px;
+		}
 
 		.ev-fp-count {
 			flex-shrink: 0;
@@ -1333,7 +1605,10 @@
 			cursor: pointer;
 			color: var(--ev-green, #1d6f42);
 			text-decoration: none;
-			&:hover { text-decoration: underline; }
+
+			&:hover {
+				text-decoration: underline;
+			}
 		}
 
 		.ev-fp-hint {
@@ -1365,9 +1640,13 @@
 		-webkit-user-select: none;
 		user-select: none;
 
-		&:last-child { border-bottom: none; }
+		&:last-child {
+			border-bottom: none;
+		}
 
-		&:hover:not(.ev-fp-locked) { background: var(--bg-light-gray, #f8f9fa); }
+		&:hover:not(.ev-fp-locked) {
+			background: var(--bg-light-gray, #f8f9fa);
+		}
 
 		// Locked row (ID column)
 		&.ev-fp-locked {
@@ -1394,8 +1673,11 @@
 		flex-shrink: 0;
 		line-height: 1;
 
-		&:active { cursor: grabbing; }
+		&:active {
+			cursor: grabbing;
+		}
 	}
+
 	.ev-fp-drag-disabled {
 		@extend .ev-fp-drag;
 		cursor: default;
@@ -1442,44 +1724,126 @@
 	}
 
 	// Field-type colour coding — muted, Excel-professional palette
-	.ev-ft-num    { background: #e8f0fe; color: #1a56c4; } // blue  — numeric
-	.ev-ft-date   { background: #fef3c7; color: #92400e; } // amber — date/time
-	.ev-ft-link   { background: #e2efda; color: #1d6f42; } // Excel green — links
-	.ev-ft-select { background: #ede9fe; color: #4c1d95; } // violet — select
-	.ev-ft-check  { background: #fde8e8; color: #b91c1c; } // red — boolean
-	.ev-ft-data   { background: #f1f5f9; color: #475569; } // slate — text
-	.ev-ft-other  { background: #f1f5f9; color: #64748b; } // slate — other
+	.ev-ft-num {
+		background: #e8f0fe;
+		color: #1a56c4;
+	}
+
+	// blue  — numeric
+	.ev-ft-date {
+		background: #fef3c7;
+		color: #92400e;
+	}
+
+	// amber — date/time
+	.ev-ft-link {
+		background: #e2efda;
+		color: #1d6f42;
+	}
+
+	// Excel green — links
+	.ev-ft-select {
+		background: #ede9fe;
+		color: #4c1d95;
+	}
+
+	// violet — select
+	.ev-ft-check {
+		background: #fde8e8;
+		color: #b91c1c;
+	}
+
+	// red — boolean
+	.ev-ft-data {
+		background: #f1f5f9;
+		color: #475569;
+	}
+
+	// slate — text
+	.ev-ft-other {
+		background: #f1f5f9;
+		color: #64748b;
+	}
+
+	// slate — other
 }
 
 // ── Dark mode overrides for field picker ──────────────────────────────────────
 
 [data-theme="dark"] {
 	.ev-fp-body {
-		.ev-fp-list { border-color: #444; }
+		.ev-fp-list {
+			border-color: #444;
+		}
 
 		.ev-fp-item {
 			border-bottom-color: #333;
-			&:hover:not(.ev-fp-locked) { background: #2a2a2a; }
-			&.ev-fp-locked { background: #222; }
-			&.ev-fp-drag-over { border-top-color: #4ec9b0; }
+
+			&:hover:not(.ev-fp-locked) {
+				background: #2a2a2a;
+			}
+
+			&.ev-fp-locked {
+				background: #222;
+			}
+
+			&.ev-fp-drag-over {
+				border-top-color: #4ec9b0;
+			}
 		}
 
-		.ev-fp-label-wrap .ev-fp-label { color: #d4d4d4; }
+		.ev-fp-label-wrap .ev-fp-label {
+			color: #d4d4d4;
+		}
 
-		.ev-ft-num    { background: #1e3a5f; color: #93c5fd; }
-		.ev-ft-date   { background: #4a0d2c; color: #f9a8d4; }
-		.ev-ft-link   { background: #064e3b; color: #6ee7b7; }
-		.ev-ft-select { background: #2e1065; color: #c4b5fd; }
-		.ev-ft-check  { background: #450a0a; color: #fca5a5; }
-		.ev-ft-data   { background: #1f2937; color: #9ca3af; }
-		.ev-ft-other  { background: #1f2937; color: #6b7280; }
+		.ev-ft-num {
+			background: #1e3a5f;
+			color: #93c5fd;
+		}
 
-		.ev-fp-custom { background: #422006; color: #fcd34d; }
+		.ev-ft-date {
+			background: #4a0d2c;
+			color: #f9a8d4;
+		}
+
+		.ev-ft-link {
+			background: #064e3b;
+			color: #6ee7b7;
+		}
+
+		.ev-ft-select {
+			background: #2e1065;
+			color: #c4b5fd;
+		}
+
+		.ev-ft-check {
+			background: #450a0a;
+			color: #fca5a5;
+		}
+
+		.ev-ft-data {
+			background: #1f2937;
+			color: #9ca3af;
+		}
+
+		.ev-ft-other {
+			background: #1f2937;
+			color: #6b7280;
+		}
+
+		.ev-fp-custom {
+			background: #422006;
+			color: #fcd34d;
+		}
 
 		.ev-columns-btn {
+			width: auto;
 			color: #4ec9b0;
 			border-color: #4ec9b0;
-			&:hover { background: #1d3829; }
+
+			&:hover {
+				background: #1d3829;
+			}
 		}
 	}
 }
@@ -1523,18 +1887,26 @@
 		border-radius: 3px;
 		border: 1px solid var(--ev-header-bg);
 
-		&:hover { background: #808080; }
+		&:hover {
+			background: #808080;
+		}
 	}
 }
 
 [data-theme="dark"] .ev-page .handsontable .ht_master .wtHolder {
 	scrollbar-color: #555 #2d2d2d;
 
-	&::-webkit-scrollbar-track { background: #2d2d2d; }
+	&::-webkit-scrollbar-track {
+		background: #2d2d2d;
+	}
+
 	&::-webkit-scrollbar-thumb {
 		background: #555;
 		border-color: #2d2d2d;
-		&:hover { background: #777; }
+
+		&:hover {
+			background: #777;
+		}
 	}
 }
 
@@ -1560,7 +1932,9 @@
 	font-size: 13px;
 	font-family: var(--ev-font);
 
-	&.ev-fnr-visible { display: block; }
+	&.ev-fnr-visible {
+		display: block;
+	}
 
 	.ev-fnr-header {
 		display: flex;
@@ -1569,7 +1943,7 @@
 		margin-bottom: 10px;
 		font-weight: 600;
 		color: var(--text-color, #333);
-		cursor: move;       // hint that the header is a drag handle
+		cursor: move; // hint that the header is a drag handle
 		-webkit-user-select: none;
 		user-select: none;
 	}
@@ -1582,7 +1956,10 @@
 		line-height: 1;
 		color: var(--text-muted, #8d99a6);
 		padding: 0 2px;
-		&:hover { color: var(--text-color, #333); }
+
+		&:hover {
+			color: var(--text-color, #333);
+		}
 	}
 
 	.ev-fnr-row {
@@ -1660,13 +2037,18 @@
 		cursor: pointer;
 		white-space: nowrap;
 
-		&:hover { background: var(--bg-color, #fff); }
+		&:hover {
+			background: var(--bg-color, #fff);
+		}
 
 		&.ev-fnr-primary {
 			background: var(--primary-color, #4363d8);
 			color: #fff;
 			border-color: transparent;
-			&:hover { opacity: 0.88; }
+
+			&:hover {
+				opacity: 0.88;
+			}
 		}
 	}
 }
@@ -1762,10 +2144,21 @@
 		color: #8a8a8a;
 	}
 
-	.ev-sb-address { color: #cccccc; }
-	.ev-sb-sep     { background: #3c3c3c; }
-	.ev-sb-label   { color: #6e6e6e; }
-	.ev-sb-divider { color: #3c3c3c; }
+	.ev-sb-address {
+		color: #cccccc;
+	}
+
+	.ev-sb-sep {
+		background: #3c3c3c;
+	}
+
+	.ev-sb-label {
+		color: #6e6e6e;
+	}
+
+	.ev-sb-divider {
+		color: #3c3c3c;
+	}
 }
 
 // ── V2.3 Async ERP formula cells ─────────────────────────────────────────────
@@ -1776,8 +2169,13 @@
 // We animate a pseudo-element's translateX instead of background-position
 // so the browser only triggers Composite, not Paint, on every frame.
 @keyframes ev-shimmer {
-	0%   { transform: translateX(-100%); }
-	100% { transform: translateX(200%); }
+	0% {
+		transform: translateX(-100%);
+	}
+
+	100% {
+		transform: translateX(200%);
+	}
 }
 
 .ev-page .htCore td.ev-formula-loading {
@@ -1791,12 +2189,10 @@
 		position: absolute;
 		inset: 0;
 		width: 60%; // narrower streak looks more polished
-		background: linear-gradient(
-			90deg,
-			transparent 0%,
-			color-mix(in srgb, var(--ev-header-bg, #f0f0f0) 70%, transparent) 50%,
-			transparent 100%
-		);
+		background: linear-gradient(90deg,
+				transparent 0%,
+				color-mix(in srgb, var(--ev-header-bg, #f0f0f0) 70%, transparent) 50%,
+				transparent 100%);
 		// will-change promotes this element to its own GPU compositing layer,
 		// making the translateX animation fully Composite (no Paint per frame).
 		// The linter hints are false-positives — it can't trace will-change context.
@@ -1811,19 +2207,17 @@
 .ev-page .htCore td.ev-cell-join-loading {
 	position: relative;
 	overflow: hidden;
-	color: transparent;   // hide empty placeholder value
+	color: transparent; // hide empty placeholder value
 
 	&::after {
 		content: "";
 		position: absolute;
 		inset: 0;
 		width: 60%;
-		background: linear-gradient(
-			90deg,
-			transparent 0%,
-			color-mix(in srgb, var(--ev-green-light, #e2efda) 90%, transparent) 50%,
-			transparent 100%
-		);
+		background: linear-gradient(90deg,
+				transparent 0%,
+				color-mix(in srgb, var(--ev-green-light, #e2efda) 90%, transparent) 50%,
+				transparent 100%);
 		will-change: transform;
 		animation: ev-shimmer 1.4s linear infinite;
 		pointer-events: none;
@@ -1833,12 +2227,10 @@
 [data-theme="dark"] {
 	.ev-page .htCore td.ev-cell-join-loading {
 		&::after {
-			background: linear-gradient(
-				90deg,
-				transparent 0%,
-				rgba(29, 111, 66, 0.18) 50%,
-				transparent 100%
-			);
+			background: linear-gradient(90deg,
+					transparent 0%,
+					rgba(29, 111, 66, 0.18) 50%,
+					transparent 100%);
 		}
 	}
 }
@@ -1861,17 +2253,20 @@
 		color: #666;
 
 		&::after {
-			background: linear-gradient(
-				90deg,
-				transparent 0%,
-				rgba(255, 255, 255, 0.06) 50%,
-				transparent 100%
-			);
+			background: linear-gradient(90deg,
+					transparent 0%,
+					rgba(255, 255, 255, 0.06) 50%,
+					transparent 100%);
 		}
 	}
 
-	.ev-page .htCore td.ev-formula-perm  { color: #f03e3e; }
-	.ev-page .htCore td.ev-formula-error { color: #fa5252; }
+	.ev-page .htCore td.ev-formula-perm {
+		color: #f03e3e;
+	}
+
+	.ev-page .htCore td.ev-formula-error {
+		color: #fa5252;
+	}
 }
 
 // ── IntelliFlow Join Canvas (V2.4) ────────────────────────────────────────────
@@ -1985,26 +2380,53 @@
 	}
 
 	// Base node: green Excel header
-	&.ev-jc-node--base > .ev-jc-node-header {
+	&.ev-jc-node--base>.ev-jc-node-header {
 		background: var(--ev-green, #1d6f42);
 		color: #fff;
 		border-radius: 2px 2px 0 0;
 
-		.ev-jc-node-title  { color: #fff; }
-		.ev-jc-node-count  { color: rgba(255,255,255,0.75); background: rgba(255,255,255,0.12); }
-		.ev-jc-node-count.ev-jc-node-count--active { color: #fff; background: rgba(255,255,255,0.22); }
+		.ev-jc-node-title {
+			color: #fff;
+		}
+
+		.ev-jc-node-count {
+			color: rgba(255, 255, 255, 0.75);
+			background: rgba(255, 255, 255, 0.12);
+		}
+
+		.ev-jc-node-count.ev-jc-node-count--active {
+			color: #fff;
+			background: rgba(255, 255, 255, 0.22);
+		}
 	}
 
 	// Non-base nodes: blue-gray Excel header
-	&:not(.ev-jc-node--base) > .ev-jc-node-header {
+	&:not(.ev-jc-node--base)>.ev-jc-node-header {
 		background: #1a4c97;
 		color: #fff;
 		border-radius: 2px 2px 0 0;
 
-		.ev-jc-node-title  { color: #fff; }
-		.ev-jc-node-remove { color: rgba(255,255,255,0.6); &:hover { color: #ffc0c0; } }
-		.ev-jc-node-count  { color: rgba(255,255,255,0.7); background: rgba(255,255,255,0.1); }
-		.ev-jc-node-count.ev-jc-node-count--active { color: #fff; background: rgba(255,255,255,0.2); }
+		.ev-jc-node-title {
+			color: #fff;
+		}
+
+		.ev-jc-node-remove {
+			color: rgba(255, 255, 255, 0.6);
+
+			&:hover {
+				color: #ffc0c0;
+			}
+		}
+
+		.ev-jc-node-count {
+			color: rgba(255, 255, 255, 0.7);
+			background: rgba(255, 255, 255, 0.1);
+		}
+
+		.ev-jc-node-count.ev-jc-node-count--active {
+			color: #fff;
+			background: rgba(255, 255, 255, 0.2);
+		}
 	}
 }
 
@@ -2020,7 +2442,9 @@
 	flex-shrink: 0;
 	min-height: 34px;
 
-	&:active { cursor: grabbing; }
+	&:active {
+		cursor: grabbing;
+	}
 }
 
 .ev-jc-node-title {
@@ -2042,7 +2466,9 @@
 	line-height: 1;
 	flex-shrink: 0;
 
-	&:hover { color: #ffc0c0; }
+	&:hover {
+		color: #ffc0c0;
+	}
 }
 
 // Scrollable field list
@@ -2053,8 +2479,15 @@
 	// Thin scrollbar
 	scrollbar-width: thin;
 	scrollbar-color: #ccc transparent;
-	&::-webkit-scrollbar { width: 5px; }
-	&::-webkit-scrollbar-thumb { background: #ccc; border-radius: 3px; }
+
+	&::-webkit-scrollbar {
+		width: 5px;
+	}
+
+	&::-webkit-scrollbar-thumb {
+		background: #ccc;
+		border-radius: 3px;
+	}
 }
 
 // Individual field row — Excel row look
@@ -2176,7 +2609,9 @@
 	box-shadow: 0 1px 5px rgba(0, 0, 0, 0.08);
 	z-index: 2;
 
-	b { color: var(--text-color, #444); }
+	b {
+		color: var(--text-color, #444);
+	}
 
 	.frappe-dark-mode & {
 		background: rgba(25, 25, 25, 0.92);
@@ -2277,10 +2712,12 @@
 // body.ev-jc-open is set by JoinCanvas.open() and removed on close()
 
 body.ev-jc-open {
+
 	// Bootstrap/Frappe modal backdrop
 	.modal-backdrop {
 		z-index: 1600 !important;
 	}
+
 	// Bootstrap/Frappe modal dialog
 	.modal {
 		z-index: 1700 !important;
@@ -2322,13 +2759,22 @@ body.ev-jc-open {
 		pointer-events: none;
 	}
 }
+
 .ev-port[data-ai-score="mid"] {
 	border-color: #f0a500;
 	background: rgba(240, 165, 0, 0.15);
 }
+
 @keyframes ev-port-pulse {
-	0%   { transform: scale(1);   opacity: 0.8; }
-	100% { transform: scale(2);   opacity: 0; }
+	0% {
+		transform: scale(1);
+		opacity: 0.8;
+	}
+
+	100% {
+		transform: scale(2);
+		opacity: 0;
+	}
 }
 
 // Suggest panel
@@ -2359,8 +2805,15 @@ body.ev-jc-open {
 }
 
 @keyframes ev-drawer-in {
-	from { transform: translateX(20px); opacity: 0; }
-	to   { transform: translateX(0);   opacity: 1; }
+	from {
+		transform: translateX(20px);
+		opacity: 0;
+	}
+
+	to {
+		transform: translateX(0);
+		opacity: 1;
+	}
 }
 
 .ev-jc-ai-drawer-head {
@@ -2401,7 +2854,9 @@ body.ev-jc-open {
 	flex-shrink: 0;
 	line-height: 1.5;
 
-	strong { color: var(--text-color); }
+	strong {
+		color: var(--text-color);
+	}
 }
 
 .ev-jc-ai-drawer-for-hint {
@@ -2422,7 +2877,9 @@ body.ev-jc-open {
 	transition: opacity 0.12s;
 	flex-shrink: 0;
 
-	&:hover { opacity: 1; }
+	&:hover {
+		opacity: 1;
+	}
 }
 
 // Blue ring on the currently targeted node
@@ -2431,7 +2888,9 @@ body.ev-jc-open {
 	outline-offset: 2px;
 	border-radius: 7px;
 
-	.ev-jc-node-ai-target { opacity: 1; }
+	.ev-jc-node-ai-target {
+		opacity: 1;
+	}
 }
 
 .ev-jc-ai-drawer-search-wrap {
@@ -2452,9 +2911,18 @@ body.ev-jc-open {
 	padding: 6px 8px 12px;
 
 	// Thin custom scrollbar
-	&::-webkit-scrollbar       { width: 5px; }
-	&::-webkit-scrollbar-track { background: transparent; }
-	&::-webkit-scrollbar-thumb { background: #ccc; border-radius: 4px; }
+	&::-webkit-scrollbar {
+		width: 5px;
+	}
+
+	&::-webkit-scrollbar-track {
+		background: transparent;
+	}
+
+	&::-webkit-scrollbar-thumb {
+		background: #ccc;
+		border-radius: 4px;
+	}
 }
 
 // ── Suggestion card ──────────────────────────────────────────────────────────
@@ -2488,8 +2956,13 @@ body.ev-jc-open {
 	flex-shrink: 0;
 	border-radius: 0;
 
-	&--meta { background: var(--ev-green); }
-	&--ml   { background: #3b82f6; }
+	&--meta {
+		background: var(--ev-green);
+	}
+
+	&--ml {
+		background: #3b82f6;
+	}
 }
 
 .ev-jc-card-body {
@@ -2527,7 +3000,10 @@ body.ev-jc-open {
 	height: 100%;
 	border-radius: 2px;
 	background: var(--ev-green);
-	&--ml { background: #3b82f6; }
+
+	&--ml {
+		background: #3b82f6;
+	}
 }
 
 .ev-jc-card-actions {
@@ -2567,22 +3043,27 @@ body.ev-jc-open {
 	line-height: 14px;
 	margin-right: 3px;
 }
+
 .ev-jc-grade--S {
 	background: #c3f0d0;
 	color: #0a5c30;
 }
+
 .ev-jc-grade--A {
 	background: #d4edda;
 	color: #155724;
 }
+
 .ev-jc-grade--B {
 	background: #fff3cd;
 	color: #856404;
 }
+
 .ev-jc-grade--C {
 	background: #fde8d8;
 	color: #7d3908;
 }
+
 .ev-jc-grade--D,
 .ev-jc-grade--F {
 	background: #fdecea;
@@ -2621,10 +3102,13 @@ body.ev-jc-open {
 	border-top: 1px solid var(--border-color);
 	background: var(--fg-color);
 	padding: 0 8px;
-	height: 32px;
+	height: 50px;
 	flex-shrink: 0;
 	scrollbar-width: none;
-	&::-webkit-scrollbar { display: none; }
+
+	&::-webkit-scrollbar {
+		display: none;
+	}
 }
 
 .ev-sheet-tab {
@@ -2662,10 +3146,26 @@ body.ev-jc-open {
 	font-size: 14px;
 	line-height: 1;
 
-	&:hover { color: var(--red); }
+	&:hover {
+		color: var(--red);
+	}
 }
 
-.ev-tab-label { font-size: 12px; }
+.ev-tab-label {
+	font-size: 12px;
+}
+
+// Blank sheet tab — pencil icon + lighter style
+.ev-sheet-tab--blank {
+	font-style: italic;
+}
+
+.ev-tab-blank-icon {
+	font-style: normal;
+	font-size: 11px;
+	opacity: 0.6;
+	margin-right: 3px;
+}
 
 .ev-sheet-add {
 	background: none;
@@ -2707,20 +3207,41 @@ body.ev-jc-open {
 		color: var(--text-muted);
 		font-size: 16px;
 
-		&:hover { color: var(--red); }
+		&:hover {
+			color: var(--red);
+		}
 	}
 }
 
 // ── V2.5 — Anomaly / Cluster row coloring ────────────────────────────────────
 
-.ev-anomaly-row td { background: rgba(224, 62, 62, 0.09) !important; }
+.ev-anomaly-row td {
+	background: rgba(224, 62, 62, 0.09) !important;
+}
 
-.ev-cluster-0 td { background: rgba(100, 181, 246, 0.14) !important; }
-.ev-cluster-1 td { background: rgba(129, 199, 132, 0.14) !important; }
-.ev-cluster-2 td { background: rgba(255, 183, 77,  0.14) !important; }
-.ev-cluster-3 td { background: rgba(186, 104, 200, 0.14) !important; }
-.ev-cluster-4 td { background: rgba(255, 138, 101, 0.14) !important; }
-.ev-cluster-5 td { background: rgba(77,  182, 172, 0.14) !important; }
+.ev-cluster-0 td {
+	background: rgba(100, 181, 246, 0.14) !important;
+}
+
+.ev-cluster-1 td {
+	background: rgba(129, 199, 132, 0.14) !important;
+}
+
+.ev-cluster-2 td {
+	background: rgba(255, 183, 77, 0.14) !important;
+}
+
+.ev-cluster-3 td {
+	background: rgba(186, 104, 200, 0.14) !important;
+}
+
+.ev-cluster-4 td {
+	background: rgba(255, 138, 101, 0.14) !important;
+}
+
+.ev-cluster-5 td {
+	background: rgba(77, 182, 172, 0.14) !important;
+}
 
 // ── V2.5 — Transform Panel (per-node) ────────────────────────────────────────
 
@@ -2738,10 +3259,19 @@ body.ev-jc-open {
 	user-select: none;
 	background: var(--fg-color);
 
-	&:hover { background: var(--bg-color); }
+	&:hover {
+		background: var(--bg-color);
+	}
 
-	.ev-tf-title { font-weight: 600; font-size: 11px; }
-	.ev-jc-transform-toggle { margin-left: auto; color: var(--text-muted); }
+	.ev-tf-title {
+		font-weight: 600;
+		font-size: 11px;
+	}
+
+	.ev-jc-transform-toggle {
+		margin-left: auto;
+		color: var(--text-muted);
+	}
 }
 
 .ev-jc-transform-badge {
@@ -2753,7 +3283,9 @@ body.ev-jc-open {
 	line-height: 16px;
 	white-space: nowrap;
 
-	&--hidden { display: none; }
+	&--hidden {
+		display: none;
+	}
 }
 
 .ev-jc-transform-body {
@@ -2777,7 +3309,9 @@ body.ev-jc-open {
 	align-items: flex-start;
 	margin-bottom: 4px;
 
-	select, input, textarea {
+	select,
+	input,
+	textarea {
 		flex: 1;
 		min-width: 0;
 		font-size: 11px;
@@ -2792,15 +3326,23 @@ body.ev-jc-open {
 		border: none;
 		cursor: pointer;
 
-		&:hover { color: var(--red); }
+		&:hover {
+			color: var(--red);
+		}
 	}
 }
 
 .ev-tf-computed-row {
 	flex-direction: column;
 
-	input, textarea { width: 100%; }
-	.ev-tf-row-del { align-self: flex-end; }
+	input,
+	textarea {
+		width: 100%;
+	}
+
+	.ev-tf-row-del {
+		align-self: flex-end;
+	}
 }
 
 .ev-tf-add-filter,
@@ -2844,7 +3386,9 @@ body.ev-jc-open {
 		font-size: 16px;
 		padding: 0 4px;
 
-		&:hover { color: var(--red); }
+		&:hover {
+			color: var(--red);
+		}
 	}
 }
 
@@ -2863,7 +3407,10 @@ body.ev-jc-open {
 		color: var(--text-muted);
 		border-bottom: 2px solid transparent;
 
-		&:hover { color: var(--text-color); }
+		&:hover {
+			color: var(--text-color);
+		}
+
 		&.active {
 			color: var(--ev-green);
 			border-bottom-color: var(--ev-green);
@@ -2883,7 +3430,9 @@ body.ev-jc-open {
 		color: var(--text-muted);
 		margin: 8px 0 4px;
 
-		&:first-child { margin-top: 0; }
+		&:first-child {
+			margin-top: 0;
+		}
 	}
 
 	.ev-ai-fields {
@@ -2907,11 +3456,20 @@ body.ev-jc-open {
 		margin: 0;
 		font-weight: normal;
 
-		input { cursor: pointer; margin: 0; }
+		input {
+			cursor: pointer;
+			margin: 0;
+		}
 	}
 
-	.ev-ai-contamination { width: 100%; }
-	.ev-ai-contam-val { font-size: 11px; color: var(--text-muted); }
+	.ev-ai-contamination {
+		width: 100%;
+	}
+
+	.ev-ai-contam-val {
+		font-size: 11px;
+		color: var(--text-muted);
+	}
 
 	.ev-ai-result-anomaly,
 	.ev-ai-result-cluster {
@@ -2925,16 +3483,31 @@ body.ev-jc-open {
 		background: var(--bg-color);
 		border: 1px solid var(--border-color);
 
-		&--success { border-color: #b7dfb9; background: #f0faf1; color: #1a6b3c; }
-		&--error   { border-color: #f5c6cb; background: #fdf0f0; color: #721c24; }
+		&--success {
+			border-color: #b7dfb9;
+			background: #f0faf1;
+			color: #1a6b3c;
+		}
+
+		&--error {
+			border-color: #f5c6cb;
+			background: #fdf0f0;
+			color: #721c24;
+		}
 	}
 
-	.ev-ai-spinner { font-size: 12px; color: var(--text-muted); }
+	.ev-ai-spinner {
+		font-size: 12px;
+		color: var(--text-muted);
+	}
 
 	.ev-ai-summary {
 		padding-left: 16px;
 		color: var(--text-muted);
-		li { margin-bottom: 3px; }
+
+		li {
+			margin-bottom: 3px;
+		}
 	}
 }
 
@@ -2978,7 +3551,9 @@ body.ev-jc-open {
 // ── CT Aggregate Panel ─────────────────────────────────────────────────────────
 
 // Hide field checkboxes on CT nodes — port dots remain for edge drawing
-.ev-jc-node--child .ev-field-select { display: none; }
+.ev-jc-node--child .ev-field-select {
+	display: none;
+}
 
 .ev-jc-node-aggregate {
 	border-top: 1px solid #b2dfdb;
@@ -3006,7 +3581,10 @@ body.ev-jc-open {
 	color: #fff;
 	padding: 1px 6px;
 	border-radius: 10px;
-	&--hidden { display: none; }
+
+	&--hidden {
+		display: none;
+	}
 }
 
 .ev-jc-agg-row {
@@ -3015,9 +3593,18 @@ body.ev-jc-open {
 	gap: 4px;
 	margin-bottom: 5px;
 
-	.ev-jc-agg-field { flex: 1; min-width: 0; font-size: 11px; }
-	.ev-jc-agg-func  { flex: 0 0 62px; font-size: 11px; }
-	.ev-jc-agg-del   {
+	.ev-jc-agg-field {
+		flex: 1;
+		min-width: 0;
+		font-size: 11px;
+	}
+
+	.ev-jc-agg-func {
+		flex: 0 0 62px;
+		font-size: 11px;
+	}
+
+	.ev-jc-agg-del {
 		flex-shrink: 0;
 		color: var(--text-muted);
 		background: none;
@@ -3026,7 +3613,10 @@ body.ev-jc-open {
 		font-size: 13px;
 		line-height: 1;
 		padding: 0 2px;
-		&:hover { color: var(--red); }
+
+		&:hover {
+			color: var(--red);
+		}
 	}
 }
 
@@ -3035,7 +3625,10 @@ body.ev-jc-open {
 	color: #00695c;
 	border-color: #b2dfdb !important;
 	margin-top: 2px;
-	&:hover { background: #e0f2f1 !important; }
+
+	&:hover {
+		background: #e0f2f1 !important;
+	}
 }
 
 .ev-jc-agg-hint {
@@ -3055,10 +3648,10 @@ body.ev-jc-open {
 	width: 420px;
 	background: #fff;
 	border-radius: 12px;
-	box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
 	display: flex;
 	flex-direction: column;
-	z-index: 1600;  // Above canvas overlay
+	z-index: 1600; // Above canvas overlay
 }
 
 .ev-jc-chat-header {
@@ -3077,11 +3670,15 @@ body.ev-jc-open {
 		color: #fff;
 		opacity: 0.8;
 		border: none;
-		background: rgba(255,255,255,0.15);
+		background: rgba(255, 255, 255, 0.15);
 		border-radius: 4px;
 		padding: 4px 8px;
 		font-size: 14px;
-		&:hover { opacity: 1; background: rgba(255,255,255,0.25); }
+
+		&:hover {
+			opacity: 1;
+			background: rgba(255, 255, 255, 0.25);
+		}
 	}
 }
 
@@ -3140,7 +3737,7 @@ body.ev-jc-open {
 
 	&:hover {
 		border-color: #667eea;
-		box-shadow: 0 4px 12px rgba(102,126,234,0.15);
+		box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
 		transform: translateY(-2px);
 	}
 
@@ -3172,7 +3769,7 @@ body.ev-jc-open {
 
 		&:focus {
 			border-color: #667eea;
-			box-shadow: 0 0 0 3px rgba(102,126,234,0.1);
+			box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
 		}
 	}
 
@@ -3498,8 +4095,13 @@ body.ev-jc-open {
 			border-radius: 50%;
 			animation: ev-jc-dot-pulse 1.4s infinite ease-in-out both;
 
-			&:nth-child(1) { animation-delay: -0.32s; }
-			&:nth-child(2) { animation-delay: -0.16s; }
+			&:nth-child(1) {
+				animation-delay: -0.32s;
+			}
+
+			&:nth-child(2) {
+				animation-delay: -0.16s;
+			}
 		}
 	}
 
@@ -3511,8 +4113,18 @@ body.ev-jc-open {
 }
 
 @keyframes ev-jc-dot-pulse {
-	0%, 80%, 100% { transform: scale(0.8); opacity: 0.5; }
-	40% { transform: scale(1.2); opacity: 1; }
+
+	0%,
+	80%,
+	100% {
+		transform: scale(0.8);
+		opacity: 0.5;
+	}
+
+	40% {
+		transform: scale(1.2);
+		opacity: 1;
+	}
 }
 
 // Chat welcome section
@@ -3647,6 +4259,7 @@ body.ev-jc-open {
 /* Space key cursor feedback */
 .ev-jc-stage[style*="cursor: grab"],
 .ev-jc-stage[style*="cursor: grabbing"] {
+
 	.ev-jc-nodes,
 	.ev-jc-svg {
 		pointer-events: none;
@@ -3868,10 +4481,14 @@ body.ev-jc-open {
 }
 
 @keyframes thinking-bounce {
-	0%, 80%, 100% {
+
+	0%,
+	80%,
+	100% {
 		transform: translateY(0);
 		opacity: 0.5;
 	}
+
 	40% {
 		transform: translateY(-8px);
 		opacity: 1;
@@ -4103,5 +4720,1288 @@ body.ev-jc-open {
 }
 
 
+// ── Read-Only Banner ─────────────────────────────────────────────────────────
+
+.ev-readonly-banner {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 5px 14px;
+	background: #fff8e1;
+	border-bottom: 1px solid #ffc107;
+	font-size: 12px;
+	color: #7a5c00;
+	flex-shrink: 0;
+
+	.ev-readonly-lock {
+		font-size: 13px;
+	}
+}
+
+[data-theme="dark"] .ev-readonly-banner {
+	background: #2d2614;
+	border-bottom-color: #5c4b00;
+	color: #d4aa40;
+}
+
+// ── CT Column Header Badge ────────────────────────────────────────────────────
+
+.ev-col-ct-badge {
+	display: inline-block;
+	background: #00897b;
+	color: #fff;
+	font-size: 9px;
+	font-weight: 700;
+	padding: 0 4px;
+	border-radius: 3px;
+	vertical-align: middle;
+	margin-right: 4px;
+	line-height: 14px;
+}
+
+// CT cells — italic to distinguish from editable cells
+.ev-hot-container td.ev-ct-cell {
+	font-style: italic;
+	color: var(--text-muted);
+}
+
+// ── Field Picker — CT Section Divider & Items ─────────────────────────────────
+
+.ev-fp-ct-section {
+	list-style: none;
+	padding: 6px 12px 4px;
+	font-size: 11px;
+	font-weight: 600;
+	color: #00897b;
+	border-top: 1px solid var(--border-color);
+	margin-top: 4px;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	-webkit-user-select: none;
+	user-select: none;
+
+	.ev-fp-ct-section-icon {
+		font-size: 13px;
+	}
+}
+
+.ev-fp-item--ct {
+	padding-left: 24px !important;
+	background: var(--bg-color);
+
+	.ev-fp-drag {
+		visibility: hidden;
+	}
+
+	// CT items not draggable (order follows schema)
+}
+
+.ev-fp-ct-badge {
+	background: #00897b !important;
+	color: #fff !important;
+}
+
 // Canvas Collaboration Sidebar Styles
 @import 'canvas_collaboration';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// V2.6 — Excel Ribbon Toolbar (Excel Mac style)
+// ─────────────────────────────────────────────────────────────────────────────
+// Design reference: Excel Mac — green header bar, clean ribbon, CSS-variable
+// aware so both light + dark Frappe themes work correctly.
+
+$ev-excel-green: #217346;
+$ev-excel-green-dark: #185c37;
+$ev-excel-green-hover: rgba(255, 255, 255, 0.15);
+
+// CSS custom properties for ribbon surfaces
+:root {
+	--ev-ribbon-tabs-bg:        rgba(232, 232, 232, 0.82);
+	--ev-ribbon-tabs-bdr:       rgba(0, 0, 0, 0.12);
+	--ev-ribbon-content-bg:     rgba(244, 244, 244, 0.88);
+	--ev-ribbon-content-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.80);
+	--ev-ribbon-sep:            rgba(0, 0, 0, 0.10);
+	--ev-tab-active-bg:         #ffffff;
+	--ev-ribbon-blur:           blur(14px) saturate(1.5);
+}
+
+// Dark mode — Frappe v14+ uses data-theme="dark" on <html>
+[data-theme="dark"] {
+	--ev-ribbon-tabs-bg:        rgba(30, 32, 34, 0.88);
+	--ev-ribbon-tabs-bdr:       rgba(255, 255, 255, 0.08);
+	--ev-ribbon-content-bg:     rgba(36, 38, 40, 0.92);
+	--ev-ribbon-content-shadow: none;
+	--ev-ribbon-sep:            rgba(255, 255, 255, 0.08);
+	--ev-tab-active-bg:         rgba(255, 255, 255, 0.08);
+	--ev-ribbon-blur:           blur(14px) saturate(1.2);
+}
+
+// ── Quick Access Bar ─────────────────────────────────────────────────────────
+// Matches the signature Excel green header from Screenshot 3.
+.ev-quick-access {
+	height: 34px;
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	padding: 0 8px;
+	flex-shrink: 0;
+	background: $ev-excel-green; // Excel's iconic green — same in light & dark
+}
+
+.ev-qa-sep {
+	width: 1px;
+	height: 18px;
+	background: rgba(255, 255, 255, 0.3);
+	margin: 0 6px;
+	flex-shrink: 0;
+}
+
+// Quick Access buttons — white text/icons on green background, always horizontal
+.ev-qa-btn {
+	display: inline-flex;
+	flex-direction: row; // override ev-tb-btn's column default
+	align-items: center;
+	gap: 5px;
+	height: 28px;
+	padding: 0 9px;
+	font-size: 12px;
+	font-weight: 500;
+	border: 1px solid transparent;
+	border-radius: 3px;
+	background: transparent;
+	color: #fff;
+	cursor: pointer;
+	white-space: nowrap;
+	-webkit-user-select: none;
+	user-select: none;
+
+	&:hover {
+		background: $ev-excel-green-hover;
+		border-color: rgba(255, 255, 255, 0.25);
+	}
+
+	svg {
+		flex-shrink: 0;
+		opacity: 0.9;
+		fill: #fff;
+		stroke: #fff;
+	}
+}
+
+// ── Tab strip (Home / Insert / Formulas / Data / View) ────────────────────────
+.ev-ribbon-tabs {
+	height: 30px;
+	display: flex;
+	background: var(--ev-ribbon-tabs-bg);
+	-webkit-backdrop-filter: var(--ev-ribbon-blur);
+	backdrop-filter: var(--ev-ribbon-blur);
+	border-bottom: 1px solid var(--ev-ribbon-tabs-bdr);
+	flex-shrink: 0;
+}
+
+.ev-ribbon-tab {
+	padding: 0 16px;
+	font-size: 12.5px;
+	cursor: pointer;
+	color: var(--text-muted);
+	display: flex;
+	align-items: center;
+	border: none;
+	background: none;
+	white-space: nowrap;
+	position: relative;
+	-webkit-user-select: none;
+	user-select: none;
+
+	&:hover {
+		color: var(--text-color);
+		background: rgba(0, 0, 0, 0.06);
+	}
+
+	&--active {
+		font-weight: 600;
+		color: $ev-excel-green;
+		background: var(--ev-tab-active-bg); // lifts to white in light / subtle in dark
+
+		&::after {
+			content: "";
+			position: absolute;
+			bottom: 0;
+			left: 0;
+			right: 0;
+			height: 2px;
+			background: $ev-excel-green;
+		}
+	}
+}
+
+// ── Content row ───────────────────────────────────────────────────────────────
+// 80px gives labels room: 4px top + ~54px btn + 2px gap + ~14px label + 6px bot = 80px
+.ev-ribbon-content {
+	height: 80px;
+	display: flex;
+	align-items: stretch;
+	overflow-x: auto;
+	scrollbar-width: none;
+	/* Firefox */
+	border-bottom: 1px solid var(--ev-ribbon-sep);
+	flex-shrink: 0;
+	background: var(--ev-ribbon-content-bg);
+	-webkit-backdrop-filter: var(--ev-ribbon-blur);
+	backdrop-filter: var(--ev-ribbon-blur);
+	box-shadow: var(--ev-ribbon-content-shadow);
+
+	&::-webkit-scrollbar {
+		display: none;
+	}
+}
+
+.ev-tab-pane {
+	display: none;
+
+	&--active {
+		display: contents;
+	}
+}
+
+// ── Ribbon groups ─────────────────────────────────────────────────────────────
+.ev-ribbon-group {
+	display: flex;
+	flex-direction: column;
+	align-items: stretch;
+	padding: 4px 6px 3px;
+	border-right: 1px solid var(--ev-ribbon-sep);
+	flex-shrink: 0;
+
+	&:last-child {
+		border-right: none;
+	}
+}
+
+.ev-ribbon-group-btns {
+	display: flex;
+	flex-flow: row wrap;
+	align-items: stretch; // buttons stretch to fill height
+	gap: 2px;
+	flex: 1;
+	align-content: center;
+	min-height: 0;
+}
+
+.ev-ribbon-group-name {
+	font-size: 10px;
+	color: var(--text-muted);
+	text-align: center;
+	padding-top: 2px;
+	line-height: 1.25;
+	display: -webkit-box;
+	-webkit-line-clamp: 2;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+}
+
+// ── Large icon+text buttons ───────────────────────────────────────────────────
+.ev-tb-btn--lg {
+	display: inline-flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 2px;
+	min-width: 42px;
+	height: auto; // stretch to fill ev-ribbon-group-btns
+	align-self: stretch;
+	min-height: 44px;
+	padding: 4px 8px;
+	border: 1px solid transparent;
+	border-radius: 3px;
+	background: transparent;
+	color: var(--text-color);
+	cursor: pointer;
+	-webkit-user-select: none;
+	user-select: none;
+
+	&:hover {
+		background: rgba(0, 0, 0, 0.06);
+		border-color: var(--border-color);
+	}
+
+	&.ev-active {
+		background: rgba(33, 115, 70, 0.12);
+		border-color: $ev-excel-green;
+		color: $ev-excel-green;
+	}
+
+	.ev-btn-icon {
+		flex-shrink: 0;
+		display: block;
+	}
+
+	.ev-btn-label {
+		font-size: 10.5px;
+		line-height: 1.2;
+		text-align: center;
+		max-width: 68px;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+}
+
+// ── AutoSum sigma ─────────────────────────────────────────────────────────────
+.ev-fn-sigma {
+	font-size: 22px;
+	font-weight: 700;
+	line-height: 1;
+	display: block;
+	color: $ev-excel-green;
+}
+
+// ── Two-row layouts: Font / Alignment / Number groups ─────────────────────────
+.ev-font-row,
+.ev-font-row2,
+.ev-align-row,
+.ev-align-row2,
+.ev-num-row,
+.ev-num-row2 {
+	display: flex;
+	flex: 1 1 100%; // full width → stacks vertically within group
+	align-items: center;
+	gap: 2px;
+}
+
+// ── Number format select ──────────────────────────────────────────────────────
+.ev-numfmt-select {
+	width: 100px;
+	height: 22px;
+	font-size: 11px;
+	border: 1px solid var(--border-color);
+	border-radius: 3px;
+	background: var(--fg-color);
+	color: var(--text-color);
+	cursor: pointer;
+	padding: 0 4px;
+}
+
+// Borders popup
+.ev-border-popup {
+	position: absolute;
+	z-index: 9999;
+	background: #fff;
+	border: 1px solid #d1d3d6;
+	border-radius: 4px;
+	padding: 4px 0;
+	min-width: 180px;
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.ev-border-item {
+	padding: 6px 14px;
+	cursor: pointer;
+	font-size: 12px;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	white-space: nowrap;
+	color: #3c4043;
+
+	&:hover {
+		background: #f1f3f4;
+	}
+}
+
+.ev-border-sep {
+	height: 1px;
+	background: #e0e0e0;
+	margin: 3px 0;
+}
+
+.ev-border-controls {
+	padding: 8px 10px 4px;
+}
+
+.ev-border-ctrl-row {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin-bottom: 6px;
+}
+
+.ev-border-ctrl-label {
+	font-size: 11px;
+	color: var(--text-muted);
+	width: 36px;
+	flex-shrink: 0;
+}
+
+.ev-border-color-pick {
+	width: 28px;
+	height: 22px;
+	padding: 1px 2px;
+	border: 1px solid var(--border-color);
+	border-radius: 3px;
+	cursor: pointer;
+	background: none;
+}
+
+.ev-border-color-preview {
+	width: 40px;
+	height: 6px;
+	border-radius: 2px;
+	display: inline-block;
+}
+
+.ev-border-style-sel,
+.ev-border-width-sel {
+	height: 22px;
+	font-size: 11px;
+	border: 1px solid var(--border-color);
+	border-radius: 3px;
+	background: var(--fg-color);
+	color: var(--text-color);
+	cursor: pointer;
+	flex: 1;
+}
+
+// Wrapper elements with relative positioning for absolute popups
+.ev-merge-wrap,
+.ev-freeze-wrap,
+.ev-fn-group-wrap,
+.ev-font-color-wrap,
+.ev-wb-save-wrap {
+	position: relative;
+}
+
+// Merge dropdown popup
+.ev-merge-popup {
+	position: absolute;
+	z-index: 9999;
+	background: var(--fg-color);
+	border: 1px solid var(--border-color);
+	border-radius: 3px;
+	padding: 4px 0;
+	min-width: 160px;
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+
+.ev-merge-item {
+	padding: 5px 12px;
+	cursor: pointer;
+	font-size: 12px;
+	white-space: nowrap;
+
+	&:hover {
+		background: var(--bg-color);
+	}
+}
+
+// Freeze pane dropdown
+.ev-freeze-popup {
+	position: absolute;
+	z-index: 9999;
+	background: var(--fg-color);
+	border: 1px solid var(--border-color);
+	border-radius: 3px;
+	padding: 4px 0;
+	min-width: 180px;
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+
+.ev-freeze-item {
+	padding: 5px 12px;
+	cursor: pointer;
+	font-size: 12px;
+	white-space: nowrap;
+
+	&:hover {
+		background: var(--bg-color);
+	}
+}
+
+// Function library dropdown
+.ev-fn-popup {
+	position: absolute;
+	z-index: 9999;
+	background: var(--fg-color);
+	border: 1px solid var(--border-color);
+	border-radius: 3px;
+	padding: 4px 0;
+	min-width: 160px;
+	max-height: 240px;
+	overflow-y: auto;
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+
+.ev-fn-item {
+	padding: 5px 12px;
+	cursor: pointer;
+	font-size: 12px;
+	font-family: var(--font-monospace, monospace);
+	white-space: nowrap;
+
+	&:hover {
+		background: var(--bg-color);
+	}
+}
+
+// Format painter — cursor + active state
+.ev-tb-fmt-painter.ev-active {
+	background: #217346 !important;
+	color: #fff !important;
+	border-color: #217346 !important;
+}
+
+body.ev-painting-mode * {
+	cursor: crosshair !important;
+}
+
+// Show formulas: monospace display for raw formula strings
+.ev-formula-raw {
+	font-family: var(--font-monospace, monospace);
+	font-size: 11px;
+	color: #1565c0;
+}
+
+// ─── Conditional Formatting dialog ───────────────────────────────────────────
+
+.ev-cf-rule-row {
+	display: flex;
+	gap: 8px;
+	align-items: center;
+	padding: 7px 0;
+	border-bottom: 1px solid var(--border-color);
+
+	&:last-child {
+		border-bottom: none;
+	}
+}
+
+// ─── Insert Chart Dialog ──────────────────────────────────────────────────────
+
+.ev-chart-dialog-backdrop {
+	position: fixed;
+	inset: 0;
+	z-index: 2000;
+	background: rgba(0, 0, 0, 0.5);
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	-webkit-backdrop-filter: blur(2px);
+	backdrop-filter: blur(2px);
+}
+
+.ev-chart-dialog {
+	background: var(--fg-color);
+	color: var(--text-color);
+	border-radius: 8px;
+	width: min(880px, 95vw);
+	height: min(580px, 90vh);   // fixed height so footer never gets pushed out
+	display: flex;
+	flex-direction: column;
+	box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35), 0 4px 16px rgba(0, 0, 0, 0.15);
+	border: 1px solid var(--border-color);
+	overflow: hidden;
+}
+
+// Header
+.ev-cd-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 14px 20px;
+	border-bottom: 1px solid var(--border-color);
+	background: var(--fg-color);
+	flex-shrink: 0;
+}
+
+.ev-cd-header-left {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+}
+
+.ev-cd-header-icon {
+	width: 20px;
+	height: 20px;
+	color: var(--ev-green);
+	flex-shrink: 0;
+}
+
+.ev-cd-header-title {
+	font-size: 15px;
+	font-weight: 700;
+	color: var(--text-color);
+	letter-spacing: -0.2px;
+}
+
+.ev-cd-close-btn {
+	width: 28px;
+	height: 28px;
+	border-radius: 50%;
+	border: none;
+	background: transparent;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	cursor: pointer;
+	color: var(--text-muted);
+	padding: 0;
+	transition: background 0.15s, color 0.15s;
+
+	svg { width: 14px; height: 14px; }
+
+	&:hover {
+		background: var(--red-highlight-color, rgba(224, 62, 62, 0.1));
+		color: var(--red);
+	}
+}
+
+// Body
+.ev-cd-body {
+	display: flex;
+	flex: 1;
+	overflow: hidden;
+	min-height: 0;
+}
+
+// Left panel
+.ev-cd-left {
+	width: 260px;
+	flex-shrink: 0;
+	border-right: 1px solid var(--border-color);
+	overflow-y: auto;
+	padding: 14px 16px;
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+	scrollbar-width: thin;
+	// Light theme explicit bg so it stands out from preview area
+	background: var(--fg-color);
+}
+
+.ev-cd-section {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+}
+
+.ev-cd-section--inline {
+	flex-direction: row;
+	align-items: center;
+	justify-content: space-between;
+}
+
+.ev-cd-section-label {
+	font-size: 10.5px;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 0.6px;
+	// Use a slightly darker muted so it reads in both light + dark
+	color: var(--text-color);
+	opacity: 0.55;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.ev-cd-section-hint {
+	font-weight: 400;
+	text-transform: none;
+	letter-spacing: 0;
+	opacity: 0.8;
+}
+
+// Chart type grid
+.ev-cd-type-grid {
+	display: grid;
+	grid-template-columns: repeat(5, 1fr);
+	gap: 6px;
+}
+
+.ev-cd-type-btn {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 5px;
+	padding: 8px 4px;
+	border: 1.5px solid var(--border-color);
+	border-radius: 6px;
+	// explicit bg so border is visible on any theme
+	background: var(--control-bg, var(--bg-color));
+	cursor: pointer;
+	color: var(--text-color);
+	opacity: 0.65;
+	transition: all 0.15s;
+
+	&:hover {
+		border-color: var(--ev-green);
+		color: var(--ev-green);
+		opacity: 1;
+		background: rgba(76, 175, 80, 0.06);
+	}
+
+	&--active {
+		border-color: var(--ev-green);
+		background: rgba(76, 175, 80, 0.1);
+		color: var(--ev-green);
+		opacity: 1;
+	}
+}
+
+.ev-cd-type-icon {
+	width: 28px;
+	height: 28px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+
+	svg {
+		width: 24px;
+		height: 24px;
+	}
+}
+
+.ev-cd-type-label {
+	font-size: 10px;
+	font-weight: 600;
+	white-space: nowrap;
+}
+
+// Inputs
+.ev-cd-input {
+	width: 100%;
+	height: 32px;
+	padding: 0 10px;
+	border: 1.5px solid var(--dark-borders-color, var(--border-color));
+	border-radius: 5px;
+	background: var(--control-bg, var(--bg-color));
+	color: var(--text-color);
+	font-size: 12px;
+	outline: none;
+	transition: border-color 0.15s;
+
+	&:focus {
+		border-color: var(--ev-green);
+		box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.12);
+	}
+}
+
+.ev-cd-select-wrap {
+	position: relative;
+}
+
+.ev-cd-select {
+	width: 100%;
+	height: 32px;
+	padding: 0 28px 0 10px;
+	border: 1.5px solid var(--dark-borders-color, var(--border-color));
+	border-radius: 5px;
+	background: var(--control-bg, var(--bg-color));
+	color: var(--text-color);
+	font-size: 12px;
+	outline: none;
+	-webkit-appearance: none;
+	appearance: none;
+	cursor: pointer;
+	transition: border-color 0.15s;
+
+	&:focus {
+		border-color: var(--ev-green);
+		box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.12);
+	}
+}
+
+.ev-cd-select-arrow {
+	position: absolute;
+	right: 9px;
+	top: 50%;
+	transform: translateY(-50%);
+	width: 12px;
+	height: 12px;
+	color: var(--text-muted);
+	pointer-events: none;
+}
+
+.ev-cd-select-sm {
+	height: 26px;
+	padding: 0 24px 0 8px;
+	border: 1.5px solid var(--border-color);
+	border-radius: 4px;
+	background: var(--bg-color);
+	color: var(--text-color);
+	font-size: 11px;
+	outline: none;
+	-webkit-appearance: none;
+	appearance: none;
+	cursor: pointer;
+}
+
+// Y axis chips
+.ev-cd-y-chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 5px;
+	max-height: 130px;
+	overflow-y: auto;
+	scrollbar-width: thin;
+}
+
+.ev-cd-y-chip {
+	display: inline-flex;
+	align-items: center;
+	padding: 3px 9px;
+	border: 1.5px solid var(--dark-borders-color, var(--border-color));
+	border-radius: 20px;
+	font-size: 11px;
+	cursor: pointer;
+	background: var(--control-bg, var(--bg-color));
+	color: var(--text-color);
+	opacity: 0.7;
+	-webkit-user-select: none;
+	user-select: none;
+	transition: all 0.12s;
+	white-space: nowrap;
+	max-width: 120px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+
+	&:hover {
+		border-color: var(--ev-green);
+		color: var(--ev-green);
+		opacity: 1;
+	}
+
+	&--on {
+		border-color: var(--ev-green);
+		background: rgba(76, 175, 80, 0.12);
+		color: var(--ev-green);
+		font-weight: 600;
+		opacity: 1;
+	}
+}
+
+// Right panel
+.ev-cd-right {
+	flex: 1;
+	display: flex;
+	flex-direction: column;
+	padding: 14px;
+	overflow: hidden;
+	// Slightly different bg in light theme to visually separate from left panel
+	background: var(--bg-color);
+	border-left: none; // already handled by left panel border-right
+}
+
+.ev-cd-preview-area {
+	flex: 1;
+	border: 1.5px dashed var(--border-color);
+	border-radius: 8px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	overflow: hidden;
+	position: relative;
+	transition: border-color 0.2s;
+
+	&:has(.ev-chart-preview-mount:not([style*="display: none"])) {
+		border-style: solid;
+		border-color: var(--border-color);
+	}
+}
+
+.ev-cd-empty-state {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 14px;
+	color: var(--text-muted);
+
+	svg {
+		width: 72px;
+		height: 72px;
+		opacity: 0.45;
+	}
+
+	p {
+		font-size: 12.5px;
+		text-align: center;
+		line-height: 1.6;
+		margin: 0;
+	}
+}
+
+.ev-cd-preview-error {
+	padding: 12px;
+	font-size: 12px;
+	color: var(--red);
+	background: rgba(224, 62, 62, 0.06);
+	border-radius: 4px;
+}
+
+// Footer — flex-wrap ensures buttons never get pushed off on narrow viewports
+.ev-cd-footer {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 8px;
+	padding: 10px 16px;
+	border-top: 1px solid var(--border-color);
+	background: var(--fg-color);
+	flex-shrink: 0;
+	min-height: 52px;
+}
+
+.ev-chart-dialog .ev-cd-preview-btn,
+button.ev-cd-preview-btn {
+	display: inline-flex !important;
+	align-items: center;
+	gap: 6px;
+	padding: 0 14px;
+	height: 32px;
+	border: 1.5px solid var(--gray-400, #adb5bd) !important;
+	border-radius: 5px;
+	background: transparent !important;
+	color: var(--text-color) !important;
+	font-size: 12px;
+	font-weight: 500;
+	cursor: pointer;
+	transition: all 0.15s;
+
+	svg { width: 14px; height: 14px; }
+
+	&:hover {
+		border-color: var(--ev-green);
+		color: var(--ev-green);
+	}
+}
+
+.ev-chart-dialog .ev-cd-cancel-btn,
+button.ev-cd-cancel-btn {
+	padding: 0 16px;
+	height: 32px;
+	border: 1.5px solid var(--gray-400, #adb5bd) !important;
+	border-radius: 5px;
+	background: transparent !important;
+	color: var(--text-color) !important;
+	font-size: 12px;
+	cursor: pointer;
+	transition: all 0.15s;
+
+	&:hover { background: var(--bg-color) !important; }
+}
+
+// Use high specificity + !important to beat Frappe's .btn reset in light theme
+.ev-chart-dialog .ev-cd-add-btn,
+button.ev-cd-add-btn {
+	display: inline-flex !important;
+	align-items: center;
+	gap: 6px;
+	padding: 0 18px;
+	height: 32px;
+	border: none !important;
+	border-radius: 5px;
+	background: #4caf50 !important;  // hardcoded — don't rely on var(--ev-green) outside app wrapper
+	color: #fff !important;
+	font-size: 12px;
+	font-weight: 600;
+	cursor: pointer;
+	transition: opacity 0.15s, transform 0.1s;
+	box-shadow: 0 2px 6px rgba(76, 175, 80, 0.4);
+	white-space: nowrap;
+	text-decoration: none !important;
+
+	svg { width: 14px; height: 14px; fill: #fff !important; }
+
+	&:hover { opacity: 0.88; transform: translateY(-1px); color: #fff !important; }
+	&:active { transform: translateY(0); }
+}
+
+// ─── Chart overlays ───────────────────────────────────────────────────────────
+
+.ev-chart-overlay {
+	position: absolute;
+	z-index: 100;
+	background: var(--fg-color);
+	border: 1px solid var(--border-color);
+	border-radius: 4px;
+	overflow: hidden;
+	box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
+}
+
+.ev-chart-overlay-header {
+	height: 28px;
+	cursor: move;
+	display: flex;
+	align-items: center;
+	background: var(--fg-color);
+	border-bottom: 1px solid var(--border-color);
+	padding: 0 8px;
+	gap: 6px;
+	-webkit-user-select: none;
+	user-select: none;
+}
+
+.ev-chart-overlay-title {
+	flex: 1;
+	font-size: 12px;
+	font-weight: 600;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.ev-chart-overlay-move,
+.ev-chart-overlay-edit,
+.ev-chart-overlay-close {
+	background: none;
+	border: none;
+	cursor: pointer;
+	color: var(--text-muted);
+	padding: 3px;
+	line-height: 1;
+	flex-shrink: 0;
+	border-radius: 3px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	transition: background 0.12s, color 0.12s;
+}
+
+.ev-chart-overlay-move:hover {
+	background: rgba(33, 150, 243, 0.12);
+	color: #2196f3;
+}
+
+.ev-chart-overlay-edit:hover {
+	background: rgba(76, 175, 80, 0.12);
+	color: var(--ev-green);
+}
+
+.ev-chart-overlay-close:hover {
+	background: rgba(224, 62, 62, 0.1);
+	color: var(--red);
+}
+
+.ev-chart-resize {
+	position: absolute;
+	right: 0;
+	bottom: 0;
+	width: 14px;
+	height: 14px;
+	cursor: se-resize;
+	background: linear-gradient(135deg, transparent 50%, rgba(0, 0, 0, .15) 50%);
+}
+
+// ─── Pivot table ──────────────────────────────────────────────────────────────
+
+.ev-pivot-table {
+	border-collapse: collapse;
+	font-size: 12px;
+	min-width: 100%;
+
+	td,
+	th {
+		border: 1px solid var(--border-color);
+		padding: 4px 8px;
+		white-space: nowrap;
+	}
+
+	th {
+		background: var(--fg-color);
+		font-weight: 600;
+	}
+}
+
+.ev-pv-zone-chip {
+	font-size: 11px;
+	background: #e8f5e9;
+	border: 1px solid #a5d6a7;
+	border-radius: 3px;
+	padding: 2px 6px;
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	cursor: grab;
+	white-space: nowrap;
+}
+
+// ─── Gridlines off ────────────────────────────────────────────────────────────
+
+.ev-hide-gridlines {
+
+	.htCore td,
+	.htCore th {
+		border-color: transparent !important;
+	}
+}
+
+// ─── Anomaly + cluster row colors (V2.5, now also used by V2.6 Analysis) ─────
+
+.ev-anomaly-row td {
+	background: rgba(224, 62, 62, 0.07) !important;
+}
+
+.ev-cluster-0 td {
+	background: rgba(100, 181, 246, 0.12) !important;
+}
+
+.ev-cluster-1 td {
+	background: rgba(129, 199, 132, 0.12) !important;
+}
+
+.ev-cluster-2 td {
+	background: rgba(255, 183, 77, 0.12) !important;
+}
+
+.ev-cluster-3 td {
+	background: rgba(186, 104, 200, 0.12) !important;
+}
+
+.ev-cluster-4 td {
+	background: rgba(255, 138, 101, 0.12) !important;
+}
+
+.ev-cluster-5 td {
+	background: rgba(77, 182, 172, 0.12) !important;
+}
+// ─── Inline Row Insert bar ────────────────────────────────────────────────────
+
+.ev-inline-insert-bar {
+	position: absolute;
+	top: 0;
+	left: 0;
+	right: 0;
+	z-index: 200;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 6px 12px;
+	background: #e8f5e9;
+	border-bottom: 2px solid #66bb6a;
+	font-size: 12px;
+	box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+
+	.ev-iib-icon {
+		font-size: 14px;
+	}
+
+	.ev-iib-info {
+		flex: 1;
+		color: var(--text-color);
+		font-weight: 500;
+	}
+
+	.ev-iib-open-form {
+		background: none;
+		border: 1px solid var(--border-color);
+		color: var(--text-muted);
+		border-radius: 3px;
+		padding: 2px 8px;
+		font-size: 11px;
+		cursor: pointer;
+
+		&:hover {
+			background: var(--bg-color);
+			color: var(--text-color);
+		}
+	}
+
+	.ev-iib-save {
+		background: var(--primary);
+		color: #fff;
+		border: none;
+		border-radius: 3px;
+		padding: 3px 10px;
+		font-size: 11px;
+		font-weight: 600;
+		cursor: pointer;
+
+		&:hover:not(:disabled) {
+			filter: brightness(1.1);
+		}
+
+		&:disabled {
+			opacity: 0.6;
+			cursor: not-allowed;
+		}
+	}
+
+	.ev-iib-cancel {
+		background: none;
+		border: 1px solid var(--border-color);
+		color: var(--text-muted);
+		border-radius: 3px;
+		padding: 2px 8px;
+		font-size: 11px;
+		cursor: pointer;
+
+		&:hover {
+			border-color: var(--red);
+			color: var(--red);
+		}
+	}
+}
+
+// New-row cells: light green tint to distinguish from existing rows
+// Editable cell in inline insert row — light green tint
+.ev-new-row-cell {
+	background: rgba(102, 187, 106, 0.08) !important;
+}
+
+// fetch_from cell in inline insert row — greyed with a subtle auto-fill indicator
+.ev-fetch-auto-cell {
+	background: rgba(102, 187, 106, 0.04) !important;
+	font-style: italic;
+	color: var(--text-muted) !important;
+
+	&::after {
+		content: " ↺";
+		font-size: 9px;
+		opacity: 0.5;
+	}
+}
+
+// ─── Tree rows (1:N fan-out) ──────────────────────────────────────────────────
+
+.ev-tree-th {
+	display: flex;
+	align-items: center;
+	gap: 3px;
+	cursor: pointer;
+	font-weight: 600;
+	color: var(--ev-green);
+	font-size: 11px;
+	justify-content: center;
+	&:hover { color: var(--ev-green-dark); }
+}
+
+.ev-tree-child-th {
+	color: var(--text-muted);
+	font-size: 13px;
+	text-align: center;
+}
+
+.ev-tree-badge {
+	background: var(--ev-green-light);
+	color: var(--ev-green-dark);
+	font-size: 10px;
+	font-weight: 700;
+	padding: 1px 5px;
+	border-radius: 10px;
+	line-height: 1.4;
+}
+
+.ev-tree-header {
+	font-weight: 500 !important;
+}
+
+.ev-tree-child {
+	color: var(--text-muted) !important;
+}
+
+[data-theme="dark"] {
+	.ev-tree-badge {
+		background: rgba(29, 111, 66, 0.3);
+		color: #4ec9b0;
+	}
+}
