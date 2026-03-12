@@ -204,6 +204,10 @@ frappe.views.excel.WorkbookManager = class WorkbookManager {
 				sort_by:         JSON.stringify(config.sort_by),
 				join_config:     JSON.stringify(config.join_config),
 				sheets:          JSON.stringify(config.sheets),
+				chart_overlays:  JSON.stringify(config.chart_overlays),
+				format_store:    JSON.stringify(config.format_store),
+				cond_fmt_rules:  JSON.stringify(config.cond_fmt_rules),
+				view_state:      JSON.stringify({ freeze_cols: config.freeze_cols, freeze_rows: config.freeze_rows, hide_gridlines: config.hide_gridlines }),
 				is_public:       is_public ? 1 : 0,
 				workbook_name:   workbook_name || null,
 			},
@@ -213,6 +217,7 @@ frappe.views.excel.WorkbookManager = class WorkbookManager {
 				this._current = { name: saved.name, title: saved.title };
 				this._update_save_label(saved.title);
 				this._save_current_to_user_settings(saved.name, saved.title);
+				this.board._mark_saved?.();
 				frappe.show_alert(
 					{ message: __('View "{0}" saved', [saved.title]), indicator: "green" },
 					3,
@@ -363,13 +368,20 @@ frappe.views.excel.WorkbookManager = class WorkbookManager {
 					return;
 				}
 
+				const _vs = this._parse_json(wb.view_state, {});
 				const config = {
 					columns_config:  this._parse_json(wb.columns_config,  []),
 					formula_columns: this._parse_json(wb.formula_columns, []),
 					filters:         this._parse_json(wb.filters,         []),
 					sort_by:         this._parse_json(wb.sort_by,         {}),
 					join_config:     this._parse_json(wb.join_config,     null),
-				sheets:          this._parse_json(wb.sheets,          null),
+					sheets:          this._parse_json(wb.sheets,          null),
+					chart_overlays:  this._parse_json(wb.chart_overlays,  []),
+					format_store:    this._parse_json(wb.format_store,    {}),
+					cond_fmt_rules:  this._parse_json(wb.cond_fmt_rules,  []),
+					freeze_cols:     _vs.freeze_cols  || 0,
+					freeze_rows:     _vs.freeze_rows  || 0,
+					hide_gridlines:  _vs.hide_gridlines || false,
 				};
 
 				this._current = { name: wb.name, title: wb.title };
@@ -470,10 +482,38 @@ frappe.views.excel.WorkbookManager = class WorkbookManager {
 		// ── sheets (V2.5) ──────────────────────────────────────────────
 		// Save current base-sheet columns into sheet_manager before serializing
 		const sm = this.board.sheet_manager;
-		if (sm) sm.save_current_columns(columns_config, formula_columns, filters, sort_by);
+		const current_sheet = sm?.get_current();
+		const is_blank_sheet = current_sheet?.is_blank === true;
+		// Skip save for blank sheets — their A-Z columns must not overwrite the
+		// base sheet's real Frappe fieldname config in sheet_manager.
+		if (sm && !is_blank_sheet) {
+			sm.save_current_columns(columns_config, formula_columns, filters, sort_by);
+		}
 		const sheets = sm ? sm.serialize() : null;
+		// When on a blank sheet, board.columns are A-Z dummies. Use the base
+		// sheet's real fieldname config for the root-level columns_config so
+		// apply_config → apply_field_selection gets proper Frappe fieldnames.
+		let root_columns_config = columns_config;
+		if (is_blank_sheet) {
+			const base_sheet = sm?.get_all()?.[0];
+			if (base_sheet?.columns_config?.length) {
+				root_columns_config = base_sheet.columns_config;
+			}
+		}
 
-		return { columns_config, formula_columns, filters, sort_by, join_config, sheets };
+		// ── chart_overlays (V2.6) ──────────────────────────────────────────
+		const chart_overlays = (this.board.chart_overlays || []).map((c) => ({ ...c }));
+
+		// ── cell formatting + conditional formatting (V2.6) ────────────────
+		const format_store   = { ...this.board.format_store };
+		const cond_fmt_rules = [...(this.board.cond_fmt_rules || [])];
+
+		// ── View tab state (V2.6) ───────────────────────────────────────────
+		const freeze_cols    = this.board._frozen_cols || 0;
+		const freeze_rows    = this.board._frozen_rows || 0;
+		const hide_gridlines = this.board.$hot_container?.hasClass("ev-hide-gridlines") || false;
+
+		return { columns_config: root_columns_config, formula_columns, filters, sort_by, join_config, sheets, chart_overlays, format_store, cond_fmt_rules, freeze_cols, freeze_rows, hide_gridlines };
 	}
 
 	// ── Restore state from config ─────────────────────────────────────────────
@@ -610,6 +650,39 @@ frappe.views.excel.WorkbookManager = class WorkbookManager {
 		if (config.sheets?.length) {
 			setTimeout(() => board.sheet_manager?.restore(config.sheets), 50);
 		}
+
+		// ── 8. Restore chart overlays (V2.6) ──────────────────────────────────────
+		if (config.chart_overlays?.length) {
+			setTimeout(() => board._restore_chart_overlays(config.chart_overlays), 100);
+		}
+
+		// ── 9. Restore cell formatting + CF rules (V2.6) ───────────────────────────
+		if (config.format_store && typeof config.format_store === "object") {
+			board.format_store = config.format_store;
+			frappe.model.user_settings.save(board.doctype, "excel_format_store", board.format_store);
+		}
+		if (Array.isArray(config.cond_fmt_rules) && config.cond_fmt_rules.length) {
+			board.cond_fmt_rules = config.cond_fmt_rules;
+			board._clear_cf_cache?.();
+			frappe.model.user_settings.save(board.doctype, "excel_cf_rules", board.cond_fmt_rules);
+		}
+		if (config.format_store || config.cond_fmt_rules?.length) {
+			setTimeout(() => board.hot?.render(), 150);
+		}
+
+		// ── 10. Restore View tab state (V2.6) ──────────────────────────────────────
+		if (config.freeze_cols > 0) {
+			setTimeout(() => board._set_freeze?.(config.freeze_cols), 50);
+		}
+		if (config.freeze_rows > 0) {
+			board._frozen_rows = config.freeze_rows;
+			frappe.model.user_settings.save(board.doctype, "excel_view_freeze_rows", config.freeze_rows);
+			setTimeout(() => { board.hot?.updateSettings({ fixedRowsTop: config.freeze_rows }); board.hot?.render(); }, 80);
+		}
+		if (config.hide_gridlines) {
+			board.$hot_container?.addClass("ev-hide-gridlines");
+			frappe.model.user_settings.save(board.doctype, "excel_hide_gridlines", true);
+		}
 	}
 
 	// ── Helpers ───────────────────────────────────────────────────────────────
@@ -645,10 +718,32 @@ frappe.views.excel.WorkbookManager = class WorkbookManager {
 		const board     = this.board;
 		const list_view = board.list_view; // save ref — board is about to be destroyed
 
-		// 1. Clear user-settings cache synchronously so the new board's
-		//    _auto_restore() sees null and doesn't reload the workbook.
+		// 1. Clear user-settings LOCAL CACHE synchronously so the new board's
+		//    _auto_restore() reads null immediately.
+		//
+		//    IMPORTANT: frappe.model.user_settings.save() compares old vs new JSON
+		//    and skips the server call when they are identical.  If we update the
+		//    in-memory cache first and THEN call save(), save() sees no diff and
+		//    never reaches the server — so the workbook name survives a page refresh.
+		//
+		//    Fix: build the cleared object, write it to the in-memory cache, then
+		//    call frappe.model.user_settings.update() DIRECTLY (bypasses the no-change
+		//    guard) to force a single server POST with all cleared keys at once.
 		this._current = null;
-		this._save_current_to_user_settings(null, null);
+		const dt = board.doctype;
+		const cleared = Object.assign({}, frappe.model.user_settings[dt] || {}, {
+			excel_current_workbook: null,
+			excel_format_store:     null,
+			excel_cf_rules:         null,
+			excel_view_freeze:      0,
+			excel_view_freeze_rows: 0,
+			excel_hide_gridlines:   false,
+			excel_chart_overlays:   [],
+		});
+		frappe.model.user_settings[dt] = cleared; // commit synchronous clear
+
+		// Single server POST — bypasses the save() no-change guard
+		frappe.model.user_settings.update(dt, cleared);
 
 		// 2. Clear filters
 		const fa = list_view.filter_area;

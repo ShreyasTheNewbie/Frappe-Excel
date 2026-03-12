@@ -43,9 +43,52 @@ frappe.views.excel.ColumnManager = class ColumnManager {
 		});
 
 		// Add columns for each fetched field (skip "name" — already added)
-		this.fields.forEach(([fieldname, doctype]) => {
+		this.fields.forEach(([fieldname]) => {
 			if (fieldname === "name") return;
-			const df = this._get_df(fieldname, doctype);
+
+			// ── Child table field: "table_fn__child_fn" ──────────────────────
+			if (fieldname.includes("__")) {
+				const sep = fieldname.indexOf("__");
+				const table_fn = fieldname.slice(0, sep);
+				const child_fn = fieldname.slice(sep + 2);
+				const table_df = this.meta.fields?.find(f => f.fieldname === table_fn);
+				const child_meta = table_df ? frappe.get_meta(table_df.options) : null;
+				const child_df = child_meta?.fields?.find(f => f.fieldname === child_fn);
+				const title = child_df
+					? `${table_df.label || table_fn} → ${child_df.label || child_fn}`
+					: fieldname;
+
+				// Use the child field's proper column config (Link, Date, Select…) so that
+				// the inline insert row gets autocomplete / date-pickers for CT fields too.
+				let ct_col;
+				if (child_df) {
+					ct_col = frappe.views.excel.get_column_config(child_df, this.can_write);
+					ct_col.data     = fieldname;  // override key to composite "table__field"
+					ct_col.title    = title;
+					ct_col.readOnly = true;        // CT cols are always read-only for normal rows
+					ct_col._readonly    = true;
+					ct_col._is_ct_col   = true;
+					ct_col._ct_table    = table_fn;
+					ct_col._df          = child_df; // keep for fetch_from / type detection
+					ct_col.width        = this._widths[fieldname] || 160;
+				} else {
+					ct_col = {
+						data: fieldname,
+						title,
+						type: "text",
+						readOnly: true,
+						_readonly: true,
+						_is_ct_col: true,
+						_ct_table: table_fn,
+						width: this._widths[fieldname] || 160,
+					};
+				}
+				columns.push(ct_col);
+				return;
+			}
+
+			// ── Regular field ─────────────────────────────────────────────────
+			const df = this._get_df(fieldname, this.meta.name);
 			if (!df) return;
 
 			const col_config = frappe.views.excel.get_column_config(df, this.can_write);

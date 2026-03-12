@@ -34,6 +34,11 @@ Works on **vanilla Frappe** and optionally unlocks ERPNext-specific formula func
 - **4-Layer Validation Engine** — Meta Guard → Pattern Matcher → Type Gate (hard incompatibility → instant red wire) → Value Overlap → Semantic (RapidFuzz); works entirely without LLMs
 - **Association Rule Mining** — mlxtend Apriori on joined data surfaces co-occurrence patterns (IF customer=X THEN territory=Y, lift ≥ 1.2)
 - **Generative BI Chat** — Natural language join discovery: "show me tasks to employee" with enhanced NLP (50+ stopwords, pattern matching, fuzzy DocType matching); clean modern UI with staggered card animations and smooth hover expansion
+- **Excel Ribbon Toolbar** — 4-tab ribbon (Home / Insert / Data / View) with Quick Access green bar; Format Painter, Borders (10 presets), Merge & Center, Number Formats, Conditional Formatting button
+- **Charts** — 5 chart types (Bar/Line/Pie/Donut/Scatter) via frappe-charts; draggable + resizable overlays; per-sheet visibility; saved in workbook config
+- **PivotTable Builder** — 4 drop zones (Rows/Columns/Values/Filters), SUM/COUNT/AVG aggregation, subtotals; "Insert to Sheet" pushes pivot into a new blank sheet tab
+- **Conditional Formatting** — 4 rule types (Cell Value / Color Scale / Top-Bottom N / Duplicate-Unique); persisted per user
+- **1:N Child Table Tree View** — CT columns with multiple rows show `▶ N` expand badge in row header; click to expand individual child rows inline
 
 ---
 
@@ -62,36 +67,78 @@ bench build --app excel_view   # required after every pull (dist files are not c
 
 ## Release Notes
 
-### v2.7 — Current (Mar 2026)
+### v2.6 — Mar 2026 (Current)
 
-**GenBI AI Conversational Bot — Multi-Turn Intelligence**
+**Excel Ribbon Toolbar + Charts + PivotTable + Conditional Formatting + Tree View**
 
-- **AI Conversational Engine** — Complete rewrite from fuzzy-only to full NLP stack with multi-turn conversation memory
-  - **6 Intent Classification** — FIND_PATH, EXPLAIN, BUILD_CANVAS, SUGGEST, ANALYZE_DATA, REFINE using sentence-transformers semantic matching (all-MiniLM-L6-v2)
-  - **3-Phase Entity Resolution** — Pronoun resolution → Exact match → Fuzzy (60%) + Semantic (40%) composite scoring with spaCy + embeddings
-  - **Conversation State** — Redis-backed session memory (1-hour TTL); tracks last entities, paths, canvas state, follow-up mode
-  - **Relationship Explanations** — Generates human-readable explanations with business context ("Sales funnel: tracking leads through conversion to orders"), Link field direction (1:1, 1:N, N:M), confidence reasoning
-  - **Data Insights** — Row counts, empty table warnings, cardinality analysis (1:N explosion detection), filter suggestions per DocType
-  - **Query Parser** — Complex query parsing using spaCy dependency parsing for auto-canvas building ("employee salary with deductions grouped by department")
-- **Enhanced UI** — Follow-up suggestion pills (interactive chips for next queries), disambiguation buttons when multiple entities match, explanation bubbles with expandable sections, data availability badges (✓ Has data / ⚠ Empty tables)
-- **Smart Context** — "Build this canvas" uses last explained path from conversation; pronoun resolution ("explain it" → resolves "it" from context); showing "top 10 of 200 paths" instead of overwhelming users
-- **Production Ready** — Auto-installs via requirements.txt (spaCy model as direct wheel URL); Frappe Cloud/Docker compatible; ~92 MB models cached after first install; no external API keys needed
-- **New Backend Modules** — 7 modules in `excel_view/genbi/`: conversation.py, intent_classifier.py, entity_resolver.py, explainer.py, query_parser.py, data_insights.py, __init__.py
-- **New API Endpoint** — `genbi_chat(query, session_id, base_doctype)` replaces simple fuzzy search with full conversational AI
-- **Dependencies Added** — spacy>=3.7, sentence-transformers>=2.2, en_core_web_sm model (auto-installed)
-- **Files modified:** [api.py](excel_view/api.py), [join_canvas.js](excel_view/public/js/excel/components/join_canvas.js), [excel_view.bundle.scss](excel_view/public/scss/excel_view.bundle.scss), [requirements.txt](requirements.txt), [pyproject.toml](pyproject.toml)
+**Ribbon Toolbar — 4-tab Excel-style ribbon**
+- **Quick Access Bar** (green header): Save View split-button · Views dropdown · Columns picker · Link Sheets
+- **Home tab**: Format Painter · Font family/size · Bold/Italic/Underline/Strikethrough · Text color · Fill color · Borders dropdown (10 presets: All Borders, Outside, Thick Box, etc.) · Merge & Center dropdown · Alignment (H+V) · Wrap · Indent · Number format (General/Currency/Percentage/Comma/Accounting) · Decimal +/- · Conditional Formatting button
+- **Insert tab**: 5 chart types (Bar/Line/Pie/Donut/Scatter) · PivotTable builder
+- **Data tab**: Sort A→Z / Z→A · Filter · Insert record · Duplicate · Delete selected rows
+- **View tab**: Freeze Panes dropdown (First Row / First Column / At Selection / Unfreeze) · Gridlines toggle
+- Tab strip uses CSS variables for glass-morphism blur — light and dark theme both covered
 
----
+**Charts (Insert → Charts)**
+- Uses `frappe.Chart` (frappe-charts 2.0.0-rc27) already bundled in Frappe desk — zero new npm deps
+- Dialog: pick X-axis field + multi-select Y-axis fields + title + live preview
+- **Group & Sum by X Axis** toggle — when enabled, duplicate X values are aggregated; auto-detects per Y field: numeric fields → SUM, non-numeric fields (e.g. ID) → COUNT with `(Count)` label suffix; ideal for customer-wise order counts or revenue totals without needing a PivotTable
+- Tree child rows automatically excluded from chart data (parent header row already contains the summary)
+- Output: draggable + resizable overlay on the grid (`position: absolute`)
+- Serialized in workbook config → restored on workbook load
+- Per-sheet visibility: charts are scoped to the sheet tab they were created on
 
-### v2.6 — Feb 2026
+**PivotTable Builder (Insert → PivotTable)**
+- Pure client-side JS — no library
+- 4 drop zones: Rows · Columns · Values · Filters; SUM/COUNT/AVG per value field
+- Subtotals row and column; grand total row
+- **"Insert to Sheet"** button — pushes pivot result as a new blank sheet tab with custom column headers
 
-**Generative BI UX Polish + Enhanced NLP**
+**Conditional Formatting (Home → Styles)**
+- Rule types: Cell Value (= / > / < / >= / <= / <> / between / contains) · Color Scale (min/mid/max interpolation) · Top/Bottom N (absolute or %) · Duplicate/Unique
+- Color pickers for fill + text color per rule
+- Rules evaluated in `afterRenderer` — layered on top of format_store
+- Persisted in user_settings (`excel_cf_rules`) and restored on load
 
-- **Modern Chat UI** — Redesigned Generative BI results with clean cards (removed 3x data redundancy), confidence badges, hop counts, and estimated field counts; no more verbose badge clutter
-- **Staggered Animation** — Sequential card loading with 80ms stagger delay for smooth visual feedback (400ms ease transition per card)
-- **Hover Expansion** — Card titles smoothly expand from single-line to multi-line on hover (cubic-bezier animation) instead of static tooltips
-- **Enhanced NLP** — Query parser expanded from 13 to 50+ stopwords; supports natural phrasing ("show me tasks to employee", "connect employee with their tasks") with pattern matching regex; improved multi-word DocType fuzzy matching (rapidfuzz token_sort_ratio)
-- **Files modified:** [join_canvas.js](excel_view/public/js/excel/components/join_canvas.js), [api.py](excel_view/api.py), [excel_view.bundle.scss](excel_view/public/scss/excel_view.bundle.scss)
+**Number Formatting (Home → Number)**
+- Formats: General · Number · Currency · Accounting · Percentage · Fraction · Scientific · Text
+- `ExcelBoard._format_num()` static method; right-aligns numeric output automatically
+- `$` and `%` quick buttons; decimal precision increase/decrease
+
+**Borders (Home → Borders)**
+- Portal-based dropdown (position: fixed — avoids ribbon overflow clipping)
+- 10 presets including Outside Borders (applies only outer edges of the selection range)
+- Stored per cell in `format_store.borders`, applied as inline `border-*` styles
+
+**Merge & Center**
+- HOT `mergeCells` plugin integration; dropdown: Merge & Center · Merge Across · Merge Cells · Unmerge
+
+**Format Painter**
+- Click to capture format from active cell; button stays highlighted (`.ev-active`)
+- Click any target cell to apply captured format; clears paint mode automatically
+
+**1:N Child Table Tree View**
+- When a CT column has multiple child rows per parent: row number header shows `▶ N` badge
+- Collapsed by default (comma-joined summary visible in header row)
+- Click the row number to expand → individual child rows appear below with `└` indicator
+- Expand state preserved across re-renders via `_expanded_keys` Set
+
+**Dark Theme**
+- All new V2.6 popup elements (borders popup, merge popup, chart overlay, portals) have full dark theme overrides
+- Tree row badge adapts (teal on dark, green-tinted on light)
+- Selected cell now shows Excel-blue tint (`--ev-sel-fill`) instead of white
+
+**Bug Fixes (Mar 2026 session)**
+- Workbook deselect: replaced `user_settings.save()` (no-change guard skipped server POST) with direct `update()` call
+- Blank sheet guard in `board.refresh()`: skips HOT `loadData` but still rerenders charts
+- Chart live data on blank sheets: triggers `list_view.refresh()` on sheet switch when charts are present
+- Formulas tab dropdowns clipped by ribbon `overflow: hidden`: fixed with portal pattern (position: fixed, appended to body)
+- `CurrencyEditor.beginEditing` throw on formula insert: wrapped in try/catch + cell editor overridden to `'text'` type before insert + cursor moved to end to prevent select-all-on-focus replacing the formula prefix
+- Cell selection turning white on dark theme: `td.current` fallback changed from `--ev-cell-bg` (#fff) to `--ev-sel-fill` (#deebf7)
+- `hot.loadData` called with 2D matrix instead of array-of-objects: fixed in tree toggle and CT enrichment
+- Inline insert `TypeError: '>' not supported between 'str' and 'float'`: HOT cell values are always strings; now coerced via meta fieldtype (`Float/Currency/Int/Percent` → `parseFloat`, `Check` → `0/1`) before `frappe.client.insert`, for both parent doc and CT child fields
+- CF default range now always spans all rows for the selected columns (was capturing single-row selection, causing unexpected partial highlights)
+- CF tree child rows: range check now uses parent header's HOT index (was bypassing row range entirely, causing unrelated tree children to be highlighted)
 
 ---
 
@@ -280,11 +327,13 @@ bench build --app excel_view   # required after every pull (dist files are not c
 
 ### v3.0+
 
-- Cross-sheet formulas (`=Sheet2!A1` syntax), charts, pivot tables, conditional formatting, dashboard mode
-- `=QUERY(doctype, fields, filters)` — range-spilling formula that pulls any DocType data into a sheet
+- Cross-sheet formulas (`=Sheet2!A1` syntax)
+- `=QUERY(doctype, fields, filters)` — range-spilling formula that pulls any DocType data into a sheet (needs HyperFormula dynamic arrays)
 - Smart Autofill — RandomForest predicts values per field per DocType
 - Stock Reorder Predictor — days-to-reorder + suggested qty column (LinearReg + IsolationForest on Bin/SLE data)
 - Impact Simulator — bi-directional change tracing across linked documents
+- Export to `.xlsx` with formatting preserved (ExcelJS)
+- Formulas tab (Function Library, Name Manager, Show Formulas toggle)
 
 ---
 

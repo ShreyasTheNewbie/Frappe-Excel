@@ -102,6 +102,92 @@ def _parse_filter_pairs(
     return filters
 
 
+# ── Child Table Data ─────────────────────────────────────────────────────────
+
+@frappe.whitelist()
+def get_child_data(doctype: str, requests: str, parent_names: str) -> dict:
+	"""
+	Fetch child table fields for a list of parent doc names and aggregate values
+	as comma-joined strings.
+
+	Args:
+	    requests: JSON dict  {table_fieldname: [child_fieldname, ...]}
+	    parent_names: JSON list of parent doc names
+
+	Returns:
+	    {parent_name: {"table_fn__child_fn": "val1, val2", ...}}
+
+	Security: requires READ on the parent DocType and on each child DocType.
+	Child field names are validated against live meta (SQL-injection safe).
+	"""
+	frappe.has_permission(doctype, "read", throw=True)
+
+	reqs: dict = frappe.parse_json(requests) or {}
+	names: list = frappe.parse_json(parent_names) or []
+
+	if not reqs or not names:
+		return {}
+
+	parent_meta = frappe.get_meta(doctype)
+	result: dict = {}
+
+	for table_fn, child_fields in reqs.items():
+		# Validate table fieldname exists on parent and is a Table type
+		table_df = next(
+			(
+				df
+				for df in parent_meta.fields
+				if df.fieldname == table_fn and df.fieldtype in ("Table", "Table MultiSelect")
+			),
+			None,
+		)
+		if not table_df:
+			continue
+
+		child_doctype: str = table_df.options
+
+		# Child tables (istable=1) inherit perms from parent; _check_doctype_permission
+		# skips the check for them, so this is safe without a separate perm row.
+		_check_doctype_permission(child_doctype, "read")
+
+		# Validate requested child fields against live meta (prevents SQL injection)
+		child_meta = frappe.get_meta(child_doctype)
+		valid_child_fields = {df.fieldname for df in child_meta.fields}
+		safe_fields = [f for f in child_fields if f in valid_child_fields]
+		if not safe_fields:
+			continue
+
+		# Fetch all matching child rows in one query
+		children = frappe.get_all(
+			child_doctype,
+			filters={"parent": ["in", names], "parentfield": table_fn},
+			fields=["parent"] + safe_fields,
+			order_by="idx asc",
+			ignore_permissions=False,
+			limit=0,
+		)
+
+		# Group by parent, collect values per field
+		parent_buckets: dict = {}
+		for child in children:
+			p = child.parent
+			if p not in parent_buckets:
+				parent_buckets[p] = {f: [] for f in safe_fields}
+			for f in safe_fields:
+				val = child.get(f)
+				if val is not None and val != "":
+					parent_buckets[p][f].append(str(val))
+
+		# Build composite keys and join values
+		for p, fields_data in parent_buckets.items():
+			if p not in result:
+				result[p] = {}
+			for f, values in fields_data.items():
+				result[p][f"{table_fn}__{f}"] = ", ".join(values)
+
+	return result
+
+
 # ── V2.3 formula endpoints ────────────────────────────────────────────────────
 
 
@@ -433,23 +519,13 @@ def save_workbook(
 	workbook_name: str | None = None,
 	join_config: str | None = None,
 	sheets: str | None = None,
+	chart_overlays: str | None = None,
+	format_store: str | None = None,
+	cond_fmt_rules: str | None = None,
+	view_state: str | None = None,
 ) -> dict:
 	"""
 	Create a new workbook or update an existing one.
-
-	Args:
-	    title:           Human-readable name shown in the "Open View" dialog.
-	    doctype_name:    The Frappe DocType this view is bound to.
-	    columns_config:  JSON string — ordered list of {fieldname, width} / formula-col defs.
-	    formula_columns: JSON string — formula column defs with per-doc values.
-	    filters:         JSON string — list of [fieldname, op, value] filter triples.
-	    sort_by:         JSON string — {field, order} sort config.
-	    is_public:       1 = shared with all users, 0 = private.
-	    workbook_name:   If set, update this existing workbook; else create new.
-	    join_config:     JSON string — V2.4 IntelliFlow join canvas state (nodes, edges, positions).
-
-	Returns:
-	    {"name": <doc_name>, "title": <title>}
 	"""
 	frappe.has_permission(doctype_name, "read", throw=True)
 
@@ -460,16 +536,19 @@ def save_workbook(
 	else:
 		doc = frappe.new_doc("Excel Workbook")
 		doc.doctype_name = doctype_name
-		# owner is set in ExcelWorkbook.before_insert() — not trusted from client.
 
-	doc.title          = title
-	doc.is_public      = frappe.utils.cint(is_public)
+	doc.title           = title
+	doc.is_public       = frappe.utils.cint(is_public)
 	doc.columns_config  = columns_config
 	doc.formula_columns = formula_columns
-	doc.filters        = filters
-	doc.sort_by        = sort_by or "{}"
-	doc.join_config    = join_config or "{}"
-	doc.sheets         = sheets or "[]"
+	doc.filters         = filters
+	doc.sort_by         = sort_by or "{}"
+	doc.join_config     = join_config or "{}"
+	doc.sheets          = sheets or "[]"
+	doc.chart_overlays  = chart_overlays or "[]"
+	doc.format_store    = format_store or "{}"
+	doc.cond_fmt_rules  = cond_fmt_rules or "[]"
+	doc.view_state      = view_state or "{}"
 
 	doc.save(ignore_permissions=False)
 
@@ -1496,6 +1575,15 @@ def get_joined_data(base_doctype: str, join_config: str, limit: int = 1000) -> l
 
 	# ── SQL building ──────────────────────────────────────────────────────────
 
+	# Pre-compute: which src_fields does each node expose to downstream edges?
+	# Needed so CT aggregate subqueries can include those fields via ANY_VALUE().
+	node_downstream_src_fields: dict[str, set] = {}
+	for edge in edges:
+		src_id = edge.get("src_node_id")
+		src_field = edge.get("src_field", "name")
+		if src_id:
+			node_downstream_src_fields.setdefault(src_id, set()).add(src_field)
+
 	select_parts = ["`t0`.`name`"]
 	joins_sql    = ""
 	node_alias   = {join_config["nodes"][0]["id"]: "t0"}
@@ -1524,6 +1612,16 @@ def get_joined_data(base_doctype: str, join_config: str, limit: int = 1000) -> l
 			# ) t1 ON t0.name = t1.task
 			VALID_FUNCS = frozenset({"SUM", "COUNT", "AVG", "MIN", "MAX"})
 			sub_selects = [f"`{tgt_f}`"]  # group-by key always first
+
+			# If downstream edges join FROM this CT node, include those src_fields
+			# via ANY_VALUE() so they are accessible in the subquery result set.
+			tgt_node_id = edge.get("tgt_node_id", "")
+			extra_join_fields = node_downstream_src_fields.get(tgt_node_id, set())
+			for ef in extra_join_fields:
+				safe_ef = _safe_identifier(ef)
+				if safe_ef and safe_ef != tgt_f:
+					sub_selects.append(f"MIN(`{safe_ef}`) AS `{safe_ef}`")
+
 			for col in agg_cols:
 				safe_f = _safe_identifier(col.get("field", ""))
 				if not safe_f:

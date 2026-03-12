@@ -87,7 +87,8 @@ frappe.views.excel.DataManager = class DataManager {
 			// In array-of-objects mode, HOT gives fieldname as 'col' (the prop key)
 			const col_def = columns.find((c) => c.data === fieldname);
 			// Skip formula/join columns — they exist only in the grid, never in the DB
-			if (!doc || !col_def || col_def._readonly || col_def._is_name_col
+			// Skip _is_new rows — they are pending inline inserts, not yet in the DB
+			if (!doc || doc._is_new || !col_def || col_def._readonly || col_def._is_name_col
 				|| col_def._is_formula_col || col_def._is_join_col) return;
 
 			const doc_name = doc.name;

@@ -291,9 +291,10 @@ frappe.views.ExcelView = class ExcelView extends frappe.views.ListView {
 				fields: this.fields,
 				list_view: this,
 			});
-		} else {
-			this.excel_board.refresh(this.data);
 		}
+		// Always call refresh — on first render this triggers CT enrichment and
+		// join re-application; on subsequent renders it reloads data into HOT.
+		this.excel_board.refresh(this.data);
 	}
 
 	render_header() {

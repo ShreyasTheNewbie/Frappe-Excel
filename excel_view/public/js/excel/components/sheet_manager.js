@@ -51,31 +51,98 @@ frappe.views.excel.SheetManager = class SheetManager {
 			title: __("Add Sheet"),
 			fields: [
 				{
+					label: __("Sheet Type"),
+					fieldname: "sheet_type",
+					fieldtype: "Select",
+					options: [
+						__("Data from DocType"),
+						__("Blank Sheet"),
+					],
+					default: __("Data from DocType"),
+					onchange() { d.refresh_dependency(); },
+				},
+				{
 					label: __("DocType"),
 					fieldname: "doctype",
 					fieldtype: "Link",
 					options: "DocType",
-					reqd: 1,
+					depends_on: `eval: doc.sheet_type === "${__("Data from DocType")}"`,
+					mandatory_depends_on: `eval: doc.sheet_type === "${__("Data from DocType")}"`,
 					get_query: () => ({
 						filters: { istable: 0, issingle: 0 },
 					}),
 				},
 				{
-					label: __("Tab Label (optional)"),
+					label: __("Tab Label"),
 					fieldname: "label",
 					fieldtype: "Data",
 				},
 			],
 			primary_action_label: __("Add"),
 			primary_action: (vals) => {
-				if (!vals.doctype) return;
-				frappe.has_permission(vals.doctype, "read", () => {
-					d.hide();
+				d.hide();
+				if (vals.sheet_type === __("Blank Sheet")) {
+					this.add_blank_sheet(vals.label || __("Sheet"));
+				} else {
+					if (!vals.doctype) return;
 					this.add_sheet(vals.doctype, vals.label || vals.doctype);
-				});
+				}
 			},
 		});
 		d.show();
+	}
+
+	/**
+	 * Add a blank (no-DocType) sheet with A–Z columns and empty rows.
+	 * @param {string} label
+	 * @returns {string} new sheet id
+	 */
+	add_blank_sheet(label) {
+		const s = this._make_state({ doctype: null, label: label || __("Sheet"), is_blank: true });
+		s.hf_sheet_id = this.board.formula_bridge.add_hf_sheet(s.label);
+		s.is_blank = true;
+		s.columns_config = this._blank_columns();
+		s.data = this._blank_data();
+		this._sheets.set(s.id, s);
+		this._render_tabs();
+		this.switch_to(s.id);
+		return s.id;
+	}
+
+	/**
+	 * Add a blank sheet pre-loaded with custom columns + data (used by PivotBuilder).
+	 * @param {string}   label
+	 * @param {Object[]} col_configs  - HOT column descriptors [{data, title, type, width}, ...]
+	 * @param {Object[]} data_rows    - array of row objects keyed by col.data
+	 * @returns {string} new sheet id
+	 */
+	add_blank_sheet_with_data(label, col_configs, data_rows) {
+		const s = this._make_state({ doctype: null, label: label || __("Pivot"), is_blank: true });
+		s.hf_sheet_id    = this.board.formula_bridge.add_hf_sheet(s.label);
+		s.is_blank       = true;
+		s.columns_config = col_configs;
+		s.data           = data_rows;
+		this._sheets.set(s.id, s);
+		this._render_tabs();
+		this.switch_to(s.id);
+		return s.id;
+	}
+
+	/** 26 letter columns (A–Z) for blank sheets. */
+	_blank_columns() {
+		return Array.from({ length: 26 }, (_, i) => {
+			const key = String.fromCharCode(65 + i);
+			return { data: key, title: key, type: "text", width: 100 };
+		});
+	}
+
+	/** 100 empty rows for blank sheets. */
+	_blank_data() {
+		return Array.from({ length: 100 }, () =>
+			Object.fromEntries(
+				Array.from({ length: 26 }, (_, i) => [String.fromCharCode(65 + i), ""])
+			)
+		);
 	}
 
 	/**
@@ -107,8 +174,9 @@ frappe.views.excel.SheetManager = class SheetManager {
 	switch_to(id) {
 		if (id === this._active_id) return;
 
-		// Save HOT scroll + col widths for current sheet
+		// Save HOT scroll + col widths + column config for current sheet
 		this._save_hot_state(this._active_id);
+		this._capture_col_config(this._active_id);
 
 		const next = this._sheets.get(id);
 		if (!next) return;
@@ -164,19 +232,27 @@ frappe.views.excel.SheetManager = class SheetManager {
 	 * @returns {Array}
 	 */
 	serialize() {
-		return [...this._sheets.values()].map((s) => ({
-			id: s.id,
-			label: s.label,
-			doctype: s.doctype,
-			hf_sheet_id: s.hf_sheet_id,
-			col_widths: s.col_widths,
-			frozen: s.frozen,
-			columns_config: s.columns_config,
-			formula_columns: s.formula_columns,
-			filters: s.filters,
-			sort_by: s.sort_by,
-			lookup_cols: s.lookup_cols,
-		}));
+		return [...this._sheets.values()].map((s) => {
+			const entry = {
+				id: s.id,
+				label: s.label,
+				doctype: s.doctype,
+				is_blank: s.is_blank || false,
+				hf_sheet_id: s.hf_sheet_id,
+				col_widths: s.col_widths,
+				frozen: s.frozen,
+				columns_config: s.columns_config,
+				formula_columns: s.formula_columns,
+				filters: s.filters,
+				sort_by: s.sort_by,
+				lookup_cols: s.lookup_cols,
+			};
+			// Persist blank sheet data (capped at 200 rows to avoid large payloads)
+			if (s.is_blank && s.data?.length) {
+				entry.blank_data = s.data.slice(0, 200);
+			}
+			return entry;
+		});
 	}
 
 	/**
@@ -193,17 +269,22 @@ frappe.views.excel.SheetManager = class SheetManager {
 				doctype: cfg.doctype,
 				label: cfg.label,
 				id: cfg.id, // restore original id for cross-sheet refs
+				is_blank: cfg.is_blank,
 			});
 			Object.assign(s, {
 				hf_sheet_id: this.board.formula_bridge.add_hf_sheet(cfg.label),
 				col_widths: cfg.col_widths || {},
 				frozen: cfg.frozen || 0,
-				columns_config: cfg.columns_config || null,
+				columns_config: cfg.columns_config || (cfg.is_blank ? this._blank_columns() : null),
 				formula_columns: cfg.formula_columns || [],
 				filters: cfg.filters || [],
 				sort_by: cfg.sort_by || null,
 				lookup_cols: cfg.lookup_cols || [],
 			});
+			if (cfg.is_blank) {
+				// Restore saved blank data, or generate fresh empty rows
+				s.data = cfg.blank_data?.length ? cfg.blank_data : this._blank_data();
+			}
 			this._sheets.set(s.id, s);
 		});
 
@@ -281,9 +362,9 @@ frappe.views.excel.SheetManager = class SheetManager {
 		});
 		$banner.find(".ev-ilk-dismiss").on("click", () => this._hide_ilk_banner());
 
-		// Insert below toolbar, above grid
+		// Insert at top of ev-grid-wrapper (this.$wrapper IS the wrapper)
 		this.$ilk_banner = $banner;
-		this.board.$wrapper.find(".ev-grid-wrapper").prepend($banner);
+		this.board.$wrapper.prepend($banner);
 	}
 
 	_hide_ilk_banner() {
@@ -408,9 +489,8 @@ frappe.views.excel.SheetManager = class SheetManager {
 
 	_build_tab_strip() {
 		this.$tabs = $(`<div class="ev-sheet-tabs"></div>`);
-		// Append below ev-hot-container (inside ev-grid-wrapper, after status bar)
-		const $wrapper = this.board.$wrapper.find(".ev-grid-wrapper");
-		$wrapper.append(this.$tabs);
+		// this.board.$wrapper IS .ev-grid-wrapper (not a parent of it), so append directly
+		this.board.$wrapper.append(this.$tabs);
 	}
 
 	_render_tabs() {
@@ -419,10 +499,15 @@ frappe.views.excel.SheetManager = class SheetManager {
 		const html = [...this._sheets.values()]
 			.map((s) => {
 				const is_active = s.id === this._active_id;
-				const is_base = s.id === this._get_sheet0_id();
+				const is_base   = s.id === this._get_sheet0_id();
+				const tip       = s.is_blank ? __("Blank Sheet") : frappe.utils.escape_html(s.doctype || "");
+				const icon      = s.is_blank
+					? `<span class="ev-tab-blank-icon" title="${__("Blank Sheet")}">✎</span>`
+					: "";
 				return `
-				<div class="ev-sheet-tab${is_active ? " ev-sheet-tab--active" : ""}"
-					data-id="${s.id}" title="${frappe.utils.escape_html(s.doctype)}">
+				<div class="ev-sheet-tab${is_active ? " ev-sheet-tab--active" : ""}${s.is_blank ? " ev-sheet-tab--blank" : ""}"
+					data-id="${s.id}" title="${tip}">
+					${icon}
 					<span class="ev-tab-label">${frappe.utils.escape_html(s.label)}</span>
 					${!is_base ? `<button class="ev-tab-close" data-id="${s.id}" title="${__("Remove")}">×</button>` : ""}
 				</div>`;
@@ -479,6 +564,20 @@ frappe.views.excel.SheetManager = class SheetManager {
 		if (holder) s.hot_scroll = { left: holder.scrollLeft, top: holder.scrollTop };
 	}
 
+	/** Snapshot current board columns into the sheet state (non-blank sheets only). */
+	_capture_col_config(id) {
+		if (!id) return;
+		const s = this._sheets.get(id);
+		if (!s || s.is_blank || !this.board.columns) return;
+		const plugin = this.board.hot?.getPlugin("manualColumnResize");
+		s.columns_config = this.board.columns.map((col, i) => {
+			const width = plugin?.columnWidthsMap?.get(i) ?? col.width ?? 140;
+			if (col._is_formula_col) return { key: col.data, label: col.title, is_formula_col: true, width };
+			if (col._is_join_col) return null;
+			return { fieldname: col.data, width };
+		}).filter(Boolean);
+	}
+
 	_apply_sheet(sheet) {
 		const board = this.board;
 
@@ -509,18 +608,47 @@ frappe.views.excel.SheetManager = class SheetManager {
 
 		board.toolbar?.sync?.();
 		board.status_bar?.clear?.();
+
+		// Show only charts that belong to this sheet
+		board.chart_manager?._show_overlays_for_sheet(sheet.id);
+
+		// If this is a blank sheet with charts, silently refresh the underlying
+		// list_view data so the charts always reflect the latest records.
+		// board.refresh() will be called back by list_view after the fetch; the
+		// blank-sheet guard in board.refresh() skips the HOT loadData (so the
+		// A-Z blank grid is not clobbered) but still calls rerender_all_visible().
+		if (sheet.is_blank) {
+			const cm = board.chart_manager;
+			const has_charts = cm?._overlays?.some(
+				(o) => !o.cfg.sheet_id || o.cfg.sheet_id === sheet.id
+			);
+			if (has_charts) {
+				board.list_view.last_args = null;
+				board.list_view.refresh();
+			}
+		}
 	}
 
 	_lazy_fetch(sheet) {
+		// Blank sheets have no DocType — just apply immediately with empty data
+		if (sheet.is_blank) {
+			this._apply_sheet(sheet);
+			return;
+		}
 		const board = this.board;
 		// Temporarily rebuild columns so the grid shows the right headers
 		board._switch_sheet_context(sheet);
 		board.hot.updateSettings({ columns: board.columns });
 		board.hot.loadData([]);
 
-		// Use frappe.get_list to fetch data for the sheet's doctype
+		// Use frappe.get_list to fetch data for the sheet's doctype.
+		// Exclude formula cols and join-style keys (contain "__") which are
+		// virtual and not valid Frappe fieldnames.
 		const fields = sheet.columns_config
-			? sheet.columns_config.filter((c) => !c.is_formula_col).map((c) => c.fieldname || c.key).filter(Boolean)
+			? sheet.columns_config
+				.filter((c) => !c.is_formula_col)
+				.map((c) => c.fieldname || c.key)
+				.filter((f) => f && !f.includes("__"))
 			: ["name"];
 
 		if (!fields.includes("name")) fields.unshift("name");
@@ -544,11 +672,12 @@ frappe.views.excel.SheetManager = class SheetManager {
 
 	// ── State helpers ─────────────────────────────────────────────────────
 
-	_make_state({ doctype, label, id }) {
+	_make_state({ doctype, label, id, is_blank }) {
 		return {
 			id: id || `ev_sheet_${++this._uid}_${Date.now()}`,
-			label: label || doctype,
+			label: label || doctype || __("Sheet"),
 			doctype,
+			is_blank: !!is_blank,
 			hf_sheet_id: 0,
 			data: null,
 			hot_scroll: { left: 0, top: 0 },
