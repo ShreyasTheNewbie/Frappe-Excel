@@ -44,6 +44,8 @@ Works on **vanilla Frappe** and optionally unlocks ERPNext-specific formula func
 
 ## Installation
 
+### Standard (bare-metal / VM bench)
+
 ```bash
 cd $PATH_TO_YOUR_BENCH
 bench get-app $URL_OF_THIS_REPO
@@ -56,7 +58,115 @@ Python ML dependencies (networkx, scikit-learn, mlxtend, rapidfuzz, etc.) are li
 bench pip install -r apps/excel_view/requirements.txt
 ```
 
-### Updating
+### Docker-based ERPNext (frappe_docker)
+
+If you are running ERPNext via [frappe_docker](https://github.com/frappe/frappe_docker), follow these steps to add Excel View to your deployment.
+
+#### 1. Add the app to your `apps.json` (custom image build)
+
+Edit (or create) your `apps.json` file that is used by `frappe_docker`'s CI to build a custom image:
+
+```json
+[
+  {
+    "url": "https://github.com/frappe/erpnext",
+    "branch": "version-15"
+  },
+  {
+    "url": "https://github.com/YOUR_ORG/excel_view",
+    "branch": "main"
+  }
+]
+```
+
+Build the custom image:
+
+```bash
+export APPS_JSON_BASE64=$(base64 -w 0 apps.json)
+
+docker build \
+  --build-arg=FRAPPE_PATH=https://github.com/frappe/frappe \
+  --build-arg=FRAPPE_BRANCH=version-15 \
+  --build-arg=APPS_JSON_BASE64=$APPS_JSON_BASE64 \
+  --tag=myorg/erpnext-excel:latest \
+  --file=images/layered/Containerfile .
+```
+
+#### 2. Update `docker-compose.yml` / `compose.yaml`
+
+Point `image:` in every `backend`, `frontend`, `queue-*`, and `scheduler` service to your custom image tag:
+
+```yaml
+services:
+  backend:
+    image: myorg/erpnext-excel:latest
+  frontend:
+    image: myorg/erpnext-excel:latest
+  queue-long:
+    image: myorg/erpnext-excel:latest
+  queue-short:
+    image: myorg/erpnext-excel:latest
+  scheduler:
+    image: myorg/erpnext-excel:latest
+```
+
+#### 3. Install the app on your site
+
+```bash
+# exec into the backend container
+docker compose exec backend bash
+
+# install the app
+bench --site your-site.localhost install-app excel_view
+bench --site your-site.localhost migrate
+```
+
+#### 4. Install Python ML dependencies inside the container
+
+The pip install runs automatically during the image build via `pyproject.toml`. If you are attaching to an **already-running** container and the packages are missing:
+
+```bash
+docker compose exec backend bash
+bench pip install -r apps/excel_view/requirements.txt
+```
+
+#### 5. JS assets — nothing to do
+
+JS bundles are built **automatically** during `docker build` (the layered `Containerfile` runs `bench build` as part of the image build). The runtime worker containers do **not** have Node.js; do not attempt to run `bench build` inside a running container.
+
+After bringing the stack up, just restart `frontend` so nginx picks up fresh static files:
+
+```bash
+docker compose restart frontend
+```
+
+#### Updating (Docker)
+
+The correct update flow is to **rebuild the image** — not `git pull` inside a running container (worker images have no Node.js so assets can't be rebuilt at runtime).
+
+```bash
+# 1. Update apps.json to the new commit/branch, then rebuild the image
+export APPS_JSON_BASE64=$(base64 -w 0 apps.json)
+docker build \
+  --build-arg=FRAPPE_PATH=https://github.com/frappe/frappe \
+  --build-arg=FRAPPE_BRANCH=version-15 \
+  --build-arg=APPS_JSON_BASE64=$APPS_JSON_BASE64 \
+  --tag=myorg/erpnext-excel:latest \
+  --file=images/layered/Containerfile .
+
+# 2. Roll the stack
+docker compose up -d
+
+# 3. Run migrations if DocTypes changed
+docker compose exec backend bench --site your-site.localhost migrate
+
+# 4. Reload nginx
+docker compose restart frontend
+```
+
+> **Note:** `bench build` is NOT needed at runtime — assets are baked into the image during step 1.
+
+### Updating (bare-metal)
 
 ```bash
 cd apps/excel_view && git pull
