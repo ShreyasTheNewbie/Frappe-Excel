@@ -97,6 +97,7 @@ import "./components/chart_manager.js";   // V2.6 — Insert Charts
 import "./components/pivot_builder.js";   // V2.6 — PivotTable Builder
 import "./components/dashboard_manager.js"; // V3.4 — Dashboard Sheets
 import "./components/tree_import.js";       // V3.3 — Tree-View Bulk Import
+import "./components/permission_panel.js";  // V3.4 — DocType Permission Panel
 import "./components/excel_board.js";
 
 // ── 5. Signal that deps are ready ─────────────────────────────────────────────

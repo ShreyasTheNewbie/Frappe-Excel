@@ -27,6 +27,7 @@ V2.3 — Frappe Formula Library
 
 import frappe
 from frappe import _
+from excel_view.decorators import excel_whitelist
 
 
 def _check_doctype_permission(doctype, ptype="read"):
@@ -5993,3 +5994,204 @@ def get_doctype_schema(doctypes):
 		}
 
 	return result
+
+
+# ── Permission Panel API ───────────────────────────────────────────────────────
+# All mutations:
+#   - @excel_whitelist(roles=["System Manager"], methods=["POST"], audit=True)
+#     replaces the old @frappe.whitelist() + frappe.only_for() + manual checks.
+# Read endpoints:
+#   - @excel_whitelist(roles=["System Manager"])  (GET is fine for reads)
+#
+# No direct DB writes — every mutation delegates to Frappe's canonical APIs
+# so cache invalidation, validation, and Custom DocPerm copy-on-write all happen
+# exactly as they do in Frappe's own Permission Manager page.
+
+_PERM_BLOCKED_DOCTYPES = frozenset({
+	"DocType", "DocField", "DocPerm", "Custom DocPerm",
+	"Property Setter", "Role", "User", "Session",
+	"DefaultValue", "Error Log", "Access Log",
+})
+
+
+def _perm_guard(doctype):
+	"""Block meta-system doctypes. Role check is handled by @excel_whitelist."""
+	if doctype in _PERM_BLOCKED_DOCTYPES:
+		frappe.throw(
+			f"Permissions for system DocType '{frappe.bold(doctype)}' cannot be "
+			"managed from Excel View.",
+			frappe.PermissionError,
+		)
+
+
+@excel_whitelist(roles=["System Manager"])
+def get_doctype_permissions(doctype):
+	"""
+	Return active permission rows for the DocType.
+	Delegates to permission_manager.get_permissions() which automatically uses
+	Custom DocPerm when present, Standard DocPerm otherwise.
+	"""
+	_perm_guard(doctype)
+	from frappe.core.page.permission_manager import permission_manager as pm
+	return pm.get_permissions(doctype=doctype)
+
+
+@excel_whitelist(roles=["System Manager"], methods=["POST"], audit=True)
+def update_role_permission(doctype, role, permlevel, ptype, value=None, if_owner=0):
+	"""
+	Toggle a single permission bit.
+	Delegates to permission_manager.update() which calls update_permission_property(),
+	validates, and schedules cache clear after DB commit.
+	Returns "refresh" if Custom DocPerm was newly initialised, None otherwise.
+	"""
+	_perm_guard(doctype)
+	from frappe.core.page.permission_manager import permission_manager as pm
+	return pm.update(
+		doctype=doctype,
+		role=role,
+		permlevel=frappe.utils.cint(permlevel),
+		ptype=ptype,
+		value=value,
+		if_owner=if_owner,
+	)
+
+
+@excel_whitelist(roles=["System Manager"], methods=["POST"], audit=True)
+def add_role_permission(doctype, role, permlevel=0):
+	"""
+	Add a new (role, permlevel) row via frappe.permissions.add_permission.
+	That function calls setup_custom_perms() then ORM-saves the new row,
+	so on_update() fires and clears doctype cache automatically.
+	"""
+	_perm_guard(doctype)
+	from frappe.permissions import add_permission
+	add_permission(doctype, role, frappe.utils.cint(permlevel))
+
+
+@excel_whitelist(roles=["System Manager"], methods=["POST"], audit=True)
+def remove_role_permission(doctype, role, permlevel, if_owner=0):
+	"""
+	Remove a (role, permlevel) row.
+	Delegates to permission_manager.remove() which validates that at least
+	one permission row remains and calls validate_permissions_for_doctype.
+	"""
+	_perm_guard(doctype)
+	from frappe.core.page.permission_manager import permission_manager as pm
+	pm.remove(
+		doctype=doctype,
+		role=role,
+		permlevel=frappe.utils.cint(permlevel),
+		if_owner=if_owner,
+	)
+
+
+@excel_whitelist(roles=["System Manager"], methods=["POST"], audit=True)
+def reset_doctype_permissions(doctype):
+	"""
+	Delete all Custom DocPerm and revert to the app's Standard DocPerm.
+	Delegates to permission_manager.reset() which calls reset_perms()
+	then clear_permissions_cache().
+	"""
+	_perm_guard(doctype)
+	from frappe.core.page.permission_manager import permission_manager as pm
+	pm.reset(doctype=doctype)
+
+
+@excel_whitelist(roles=["System Manager"])
+def get_field_permlevels(doctype):
+	"""
+	Return every data field with its current permlevel.
+	frappe.get_meta() already merges Property Setter overrides, so df.permlevel
+	is always the live value — no separate Property Setter query needed.
+	"""
+	_perm_guard(doctype)
+	SKIP_TYPES = frozenset({
+		"Section Break", "Column Break", "Tab Break",
+		"Fold", "Heading", "HTML", "Custom HTML", "Password",
+		"Table", "Table MultiSelect",
+	})
+	meta = frappe.get_meta(doctype)
+	return [
+		{
+			"fieldname": df.fieldname,
+			"label":     df.label or df.fieldname,
+			"fieldtype": df.fieldtype,
+			"permlevel": frappe.utils.cint(df.permlevel),
+		}
+		for df in meta.fields
+		if df.fieldtype not in SKIP_TYPES and df.fieldname and not df.is_virtual
+	]
+
+
+@excel_whitelist(roles=["System Manager"], methods=["POST"], audit=True)
+def set_field_permlevel(doctype, fieldname, permlevel):
+	"""
+	Change a field's permlevel via Property Setter (upgrade-safe).
+	frappe.make_property_setter creates/updates a Property Setter record and
+	calls frappe.clear_cache(doctype) inside its validate() hook automatically.
+	"""
+	_perm_guard(doctype)
+	permlevel = frappe.utils.cint(permlevel)
+	if not 0 <= permlevel <= 9:
+		frappe.throw("permlevel must be between 0 and 9.")
+
+	# Validate field exists in this doctype
+	meta = frappe.get_meta(doctype)
+	if not meta.get_field(fieldname):
+		frappe.throw(f"Field '{frappe.bold(fieldname)}' not found in {frappe.bold(doctype)}.")
+
+	frappe.make_property_setter({
+		"doctype":         doctype,
+		"doctype_or_field": "DocField",
+		"fieldname":       fieldname,
+		"property":        "permlevel",
+		"value":           permlevel,
+		"property_type":   "Int",
+	}, is_system_generated=False)
+
+	# Belt-and-suspenders: schedule one more clear after commit
+	frappe.db.after_commit.add(lambda: frappe.clear_cache(doctype=doctype))
+
+
+@excel_whitelist(roles=["System Manager"])
+def get_role_user_counts():
+	"""
+	Return {role_name: user_count} for every role that has at least one user.
+	Single aggregating query — O(1) round-trips regardless of role count.
+	"""
+	rows = frappe.db.sql(
+		"SELECT role, COUNT(*) AS cnt"
+		" FROM `tabHas Role`"
+		" WHERE parenttype = 'User'"
+		" GROUP BY role",
+		as_dict=True,
+	)
+	return {r.role: r.cnt for r in rows}
+
+
+@excel_whitelist(roles=["System Manager"])
+def get_all_roles():
+	"""
+	Return sorted list of non-disabled, non-automatic role names.
+	Mirrors permission_manager.get_roles_and_doctypes() role list.
+	"""
+	try:
+		from frappe.permissions import AUTOMATIC_ROLES
+		restricted = set(AUTOMATIC_ROLES)
+	except ImportError:
+		restricted = {"All", "Guest"}
+
+	if frappe.session.user != "Administrator":
+		custom_user_type_roles = frappe.get_all(
+			"User Type", filters={"is_standard": 0}, fields=["role"], pluck="role"
+		)
+		restricted.update(custom_user_type_roles)
+
+	restricted.add("Administrator")
+
+	return frappe.get_all(
+		"Role",
+		filters={"disabled": 0, "name": ["not in", list(restricted)]},
+		pluck="name",
+		order_by="name asc",
+	)

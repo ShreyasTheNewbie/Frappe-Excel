@@ -36,6 +36,7 @@ frappe.views.excel.ExcelToolbar = class ExcelToolbar {
 		this._render();
 		this._bind_events();
 		this._sync_view_state();
+		this._init_tooltips();
 	}
 
 	_render() {
@@ -45,361 +46,294 @@ frappe.views.excel.ExcelToolbar = class ExcelToolbar {
 		$(this.wrapper).html(`
 			<div class="ev-toolbar-outer">
 
-				<!-- ── Quick Access Bar ─────────────────────────────────────── -->
-				<div class="ev-quick-access">
-					<div class="ev-wb-save-wrap">
-						<button class="ev-tb-btn ev-qa-btn ev-wb-save-btn" title="${__("Save current view")}">
-							<svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M2 2a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V5.5L11.5 1H3a1 1 0 0 0-1 1zm0 1h9l3 3.5V13H2V3zm3 6h6v1H5v-1zm0-2h6v1H5V7z"/></svg>
-							<span class="ev-wb-save-label">${__("Save View")}</span>
-						</button>
-						<button class="ev-tb-btn ev-qa-btn ev-wb-deselect-btn hide" title="${__("Deselect")}">×</button>
-						<button class="ev-tb-btn ev-qa-btn ev-wb-dropdown-arrow" title="${__("More")}">▾</button>
-						<div class="ev-wb-dropdown hide">
-							<button class="ev-wb-dd-item" data-action="save_as">${__("Save As…")}</button>
-						</div>
+				<!-- ── Single compact toolbar row ────────────────────────────── -->
+				<div class="ev-toolbar">
+
+					<!-- Left: tab pills -->
+					<div class="ev-ribbon-tabs" role="tablist">
+						<div class="ev-ribbon-tab ev-ribbon-tab--active" data-tab="home" role="tab">${__("Home")}</div>
+						<div class="ev-ribbon-tab" data-tab="insert" role="tab">${__("Insert")}</div>
+						<!-- <div class="ev-ribbon-tab" data-tab="formulas" role="tab">${__("Formulas")}</div> -->
+						<div class="ev-ribbon-tab" data-tab="data" role="tab">${__("Data")}</div>
+						<div class="ev-ribbon-tab" data-tab="view" role="tab">${__("View")}</div>
 					</div>
-					<button class="ev-tb-btn ev-qa-btn ev-wb-views-btn" title="${__("Open a saved view")}">
-						<svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M1 3.5A1.5 1.5 0 0 1 2.5 2h2.764c.958 0 1.76.56 2.311 1.184C7.985 3.648 8.48 4 9 4h4.5A1.5 1.5 0 0 1 15 5.5v7a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 1 12.5v-9z"/></svg>
-						${__("Views")}
-					</button>
-					<div class="ev-qa-sep"></div>
-					<button class="ev-tb-btn ev-qa-btn ev-columns-btn" title="${__("Choose Columns")}">
-						<svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="1" width="4" height="14" rx="1"/><rect x="6" y="1" width="4" height="14" rx="1"/><rect x="11" y="1" width="4" height="14" rx="1"/></svg>
-						${__("Columns")}
-					</button>
-					<button class="ev-tb-btn ev-qa-btn ev-join-btn" title="${__("Link Sheets")}">
-						<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="3" cy="8" r="2.2"/><circle cx="13" cy="3.5" r="2.2"/><circle cx="13" cy="12.5" r="2.2"/><line x1="5.1" y1="7.1" x2="10.9" y2="4.3"/><line x1="5.1" y1="8.9" x2="10.9" y2="11.7"/></svg>
-						${__("Link Sheets")}
-					</button>
-					<div class="ev-qa-sep"></div>
-					<!-- ── Period Picker ──────────────────────────────────── -->
-					<div class="ev-period-wrap">
-						<button class="ev-tb-btn ev-qa-btn ev-period-btn" title="${__("Filter formula aggregates by date period")}">
-							<svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M11 6.5a.5.5 0 0 1 .5-.5h1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-1a.5.5 0 0 1-.5-.5v-1zm-3 0a.5.5 0 0 1 .5-.5h1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-1a.5.5 0 0 1-.5-.5v-1zm-5 3a.5.5 0 0 1 .5-.5h1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-1a.5.5 0 0 1-.5-.5v-1zm3 0a.5.5 0 0 1 .5-.5h1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-1a.5.5 0 0 1-.5-.5v-1zM3.5 0a.5.5 0 0 1 .5.5V1h8V.5a.5.5 0 0 1 1 0V1h1a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2h1V.5a.5.5 0 0 1 .5-.5zM2 2a1 1 0 0 0-1 1v1h14V3a1 1 0 0 0-1-1H2zm13 3H1v9a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V5z"/></svg>
-							<span class="ev-period-label">${__("This Month")}</span>
-							<svg width="8" height="8" viewBox="0 0 8 8" fill="currentColor" style="margin-left:2px"><path d="M1 2l3 3 3-3"/></svg>
-						</button>
-						<div class="ev-period-dropdown hide">
-							<div class="ev-period-item" data-period="today">${__("Today")}</div>
-							<div class="ev-period-item" data-period="this_week">${__("This Week")}</div>
-							<div class="ev-period-item ev-period-item--active" data-period="this_month">${__("This Month")}</div>
-							<div class="ev-period-item" data-period="last_month">${__("Last Month")}</div>
-							<div class="ev-period-item" data-period="this_quarter">${__("This Quarter")}</div>
-							<div class="ev-period-item" data-period="last_quarter">${__("Last Quarter")}</div>
-							<div class="ev-period-item" data-period="this_year">${__("This Year")}</div>
-							<div class="ev-period-item" data-period="last_year">${__("Last Year")}</div>
-							<div class="ev-period-sep"></div>
-							<div class="ev-period-item" data-period="custom">${__("Custom Range…")}</div>
-						</div>
-					</div>
-				</div>
 
-				<!-- ── Tab Strip ────────────────────────────────────────────── -->
-				<div class="ev-ribbon-tabs" role="tablist">
-					<div class="ev-ribbon-tab ev-ribbon-tab--active" data-tab="home" role="tab">${__("Home")}</div>
-					<div class="ev-ribbon-tab" data-tab="insert" role="tab">${__("Insert")}</div>
-					<!-- <div class="ev-ribbon-tab" data-tab="formulas" role="tab">${__("Formulas")}</div> -->
-					<div class="ev-ribbon-tab" data-tab="data" role="tab">${__("Data")}</div>
-					<div class="ev-ribbon-tab" data-tab="view" role="tab">${__("View")}</div>
-				</div>
+					<div class="ev-tb-sep"></div>
 
-				<!-- ── Tab Content ──────────────────────────────────────────── -->
-				<div class="ev-ribbon-content">
-
-					<!-- HOME TAB ─────────────────────────────────────────────── -->
+					<!-- HOME TAB ────────────────────────────────────────────── -->
 					<div class="ev-tab-pane ev-tab-pane--active" data-tab="home">
-
-						${this._grp(__("Clipboard"), `
-							<button class="ev-tb-btn ev-tb-btn--lg ev-tb-fmt-painter" title="${__("Format Painter")}">
-								<svg class="ev-btn-icon" width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><path d="M3 0a1 1 0 0 0-1 1v1H1a1 1 0 0 0 0 2h1v10a1 1 0 0 0 2 0V4h1a3 3 0 0 0 3-3V0H3zm0 2V1h5v0a1 1 0 0 1-1 1H3zM9 5a3 3 0 0 1 3 3v4h1a1 1 0 0 1 0 2h-4a1 1 0 0 1 0-2h1V8a1 1 0 0 0-1-1H9V5z"/></svg>
-								<span class="ev-btn-label">${__("Format Painter")}</span>
+						<!-- Font -->
+						<select class="ev-tb-select ev-tb-font-family" data-ev-tip="${__("Font")}">
+							${fonts.map(f => `<option value="${f}"${f==="Calibri"?" selected":""}>${f}</option>`).join("")}
+						</select>
+						<select class="ev-tb-select ev-tb-font-size" data-ev-tip="${__("Font Size")}">
+							${sizes.map(s => `<option value="${s}"${s===12?" selected":""}>${s}</option>`).join("")}
+						</select>
+						<button class="ev-tb-btn ev-tb-font-grow" data-ev-tip="${__("Grow Font")}"><b>A</b><sup style="font-size:8px;line-height:1">▲</sup></button>
+						<button class="ev-tb-btn ev-tb-font-shrink" data-ev-tip="${__("Shrink Font")}"><b>A</b><sub style="font-size:8px;line-height:1">▼</sub></button>
+						<div class="ev-tb-sep"></div>
+						<!-- Style -->
+						<button class="ev-tb-btn ev-fmt-btn ev-btn-bold" data-fmt="bold" data-ev-tip="${__("Bold")} (Ctrl+B)"><b>B</b></button>
+						<button class="ev-tb-btn ev-fmt-btn ev-btn-italic" data-fmt="italic" data-ev-tip="${__("Italic")} (Ctrl+I)"><i>I</i></button>
+						<button class="ev-tb-btn ev-fmt-btn ev-btn-underline" data-fmt="underline" data-ev-tip="${__("Underline")} (Ctrl+U)"><u>U</u></button>
+						<button class="ev-tb-btn ev-fmt-btn ev-btn-strike" data-fmt="strike" data-ev-tip="${__("Strikethrough")}"><s>S</s></button>
+						<div class="ev-tb-sep"></div>
+						<!-- Colors + Borders -->
+						<button class="ev-tb-btn ev-color-trigger" data-type="color" data-ev-tip="${__("Font Color")}">
+							<span class="ev-color-a">A</span>
+							<span class="ev-tb-color-bar ev-text-bar" style="background:${this._last_text_color}"></span>
+						</button>
+						<button class="ev-tb-btn ev-color-trigger ev-color-fill-btn" data-type="bg" data-ev-tip="${__("Fill Color")}">
+							<svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M2 10l7-7 3 3-7 7H2v-3z" stroke="currentColor" stroke-width="1.2" fill="rgba(100,100,100,0.12)"/><path d="M11 1l2 2" stroke="currentColor" stroke-width="1.5"/></svg>
+							<span class="ev-tb-color-bar ev-bg-bar" style="background:${this._last_bg_color}"></span>
+						</button>
+						<button class="ev-tb-btn ev-border-trigger" data-ev-tip="${__("Borders")}">
+							<svg width="13" height="13" viewBox="0 0 14 14"><rect x="1" y="1" width="12" height="12" rx="0" fill="none" stroke="currentColor" stroke-width="1.5"/><line x1="1" y1="7" x2="13" y2="7" stroke="currentColor" stroke-width="0.8"/><line x1="7" y1="1" x2="7" y2="13" stroke="currentColor" stroke-width="0.8"/></svg>
+							<svg width="7" height="7" viewBox="0 0 8 8" fill="currentColor"><path d="M1 2l3 3 3-3"/></svg>
+						</button>
+						<div class="ev-tb-sep"></div>
+						<!-- Alignment -->
+						<button class="ev-tb-btn ev-fmt-btn" data-fmt="alignLeft" data-ev-tip="${__("Align Left")}">
+							<span class="ev-align-icon ev-align-left"></span>
+						</button>
+						<button class="ev-tb-btn ev-fmt-btn" data-fmt="alignCenter" data-ev-tip="${__("Align Center")}">
+							<span class="ev-align-icon ev-align-center"></span>
+						</button>
+						<button class="ev-tb-btn ev-fmt-btn" data-fmt="alignRight" data-ev-tip="${__("Align Right")}">
+							<span class="ev-align-icon ev-align-right"></span>
+						</button>
+						<button class="ev-tb-btn ev-fmt-btn" data-fmt="wrap" data-ev-tip="${__("Wrap Text")}">
+							<svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="2" width="12" height="1.5" rx="0.5"/><rect x="1" y="6" width="8" height="1.5" rx="0.5"/><path d="M10 4.5v5l2-2.5-2-2.5z"/><rect x="1" y="10" width="12" height="1.5" rx="0.5"/></svg>
+						</button>
+						<div class="ev-merge-wrap">
+							<button class="ev-tb-btn ev-merge-btn" data-ev-tip="${__("Merge & Center")}">
+								<svg width="13" height="13" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="1" width="5" height="12" rx="1" opacity=".35"/><rect x="8" y="1" width="5" height="12" rx="1" opacity=".35"/><path d="M4 6.5l-2 1.5 2 1.5V8h6v1.5l2-1.5-2-1.5V8H4z"/></svg>
 							</button>
-						`)}
-
-						${this._grp(__("Font"), `
-							<div class="ev-font-row">
-								<select class="ev-tb-select ev-tb-font-family" title="${__("Font")}">
-									${fonts.map(f => `<option value="${f}"${f==="Calibri"?" selected":""}>${f}</option>`).join("")}
-								</select>
-								<select class="ev-tb-select ev-tb-font-size" title="${__("Font Size")}">
-									${sizes.map(s => `<option value="${s}"${s===12?" selected":""}>${s}</option>`).join("")}
-								</select>
-								<button class="ev-tb-btn ev-tb-font-grow" title="${__("Grow Font")}"><b>A</b><sup style="font-size:9px">▲</sup></button>
-								<button class="ev-tb-btn ev-tb-font-shrink" title="${__("Shrink Font")}"><b>A</b><sub style="font-size:9px">▼</sub></button>
+							<button class="ev-tb-btn ev-merge-dropdown-arrow" data-ev-tip="${__("Merge options")}"><svg width="7" height="7" viewBox="0 0 8 8" fill="currentColor"><path d="M1 2l3 3 3-3"/></svg></button>
+							<div class="ev-merge-popup hide">
+								<div class="ev-border-item" data-merge="center">${__("Merge & Center")}</div>
+								<div class="ev-border-item" data-merge="across">${__("Merge Across")}</div>
+								<div class="ev-border-item" data-merge="cells">${__("Merge Cells")}</div>
+								<div class="ev-border-sep"></div>
+								<div class="ev-border-item" data-merge="unmerge">${__("Unmerge Cells")}</div>
 							</div>
-							<div class="ev-font-row2">
-								<button class="ev-tb-btn ev-fmt-btn ev-btn-bold" data-fmt="bold" title="${__("Bold")} (Ctrl+B)"><b>B</b></button>
-								<button class="ev-tb-btn ev-fmt-btn ev-btn-italic" data-fmt="italic" title="${__("Italic")} (Ctrl+I)"><i>I</i></button>
-								<button class="ev-tb-btn ev-fmt-btn ev-btn-underline" data-fmt="underline" title="${__("Underline")} (Ctrl+U)">U</button>
-								<button class="ev-tb-btn ev-fmt-btn ev-btn-strike" data-fmt="strike" title="${__("Strikethrough")}"><s>S</s></button>
-								<div class="ev-font-color-wrap">
-									<button class="ev-tb-btn ev-color-trigger" data-type="color" title="${__("Font Color")}">
-										<span class="ev-color-a">A</span>
-										<span class="ev-tb-color-bar ev-text-bar" style="background:${this._last_text_color}"></span>
-									</button>
-									<button class="ev-tb-btn ev-color-trigger ev-color-fill-btn" data-type="bg" title="${__("Fill Color")}">
-										<svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M2 10l7-7 3 3-7 7H2v-3z" stroke="currentColor" stroke-width="1.2" fill="rgba(100,100,100,0.12)"/><path d="M11 1l2 2" stroke="currentColor" stroke-width="1.5"/></svg>
-										<span class="ev-tb-color-bar ev-bg-bar" style="background:${this._last_bg_color}"></span>
-									</button>
-									<button class="ev-tb-btn ev-border-trigger" title="${__("Borders")}">
-										<svg width="13" height="13" viewBox="0 0 14 14"><rect x="1" y="1" width="12" height="12" rx="0" fill="none" stroke="currentColor" stroke-width="1.5"/><line x1="1" y1="7" x2="13" y2="7" stroke="currentColor" stroke-width="0.8"/><line x1="7" y1="1" x2="7" y2="13" stroke="currentColor" stroke-width="0.8"/></svg>
-										<span style="font-size:9px">▾</span>
-									</button>
-								</div>
-							</div>
-						`)}
+						</div>
+						<div class="ev-tb-sep"></div>
+						<!-- Number -->
+						<button class="ev-tb-btn ev-num-currency" data-ev-tip="${__("Currency")}"><b>$</b></button>
+						<button class="ev-tb-btn ev-fmt-btn ev-num-percent" data-fmt="numfmt_pct" data-ev-tip="${__("Percent Style")}"><b>%</b></button>
+						<button class="ev-tb-btn ev-num-comma" data-ev-tip="${__("Comma Style")}"><b>,</b></button>
+						<button class="ev-tb-btn ev-num-inc-dec" data-decimal="inc" data-ev-tip="${__("Increase Decimal")}">
+							<svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><text x="0" y="12" font-size="10">.0</text><text x="9" y="9" font-size="8">+</text></svg>
+						</button>
+						<button class="ev-tb-btn ev-num-inc-dec" data-decimal="dec" data-ev-tip="${__("Decrease Decimal")}">
+							<svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><text x="0" y="12" font-size="10">.0</text><text x="9" y="9" font-size="8">–</text></svg>
+						</button>
+						<select class="ev-tb-select ev-numfmt-select" data-ev-tip="${__("Number Format")}">
+							<option value="general">${__("General")}</option>
+							<option value="number">${__("Number")}</option>
+							<option value="currency">${__("Currency")}</option>
+							<option value="accounting">${__("Accounting")}</option>
+							<option value="short_date">${__("Short Date")}</option>
+							<option value="percentage">${__("Percentage")}</option>
+							<option value="fraction">${__("Fraction")}</option>
+							<option value="scientific">${__("Scientific")}</option>
+							<option value="text">${__("Text")}</option>
+						</select>
+						<div class="ev-tb-sep"></div>
+						<!-- Painter + CF -->
+						<button class="ev-tb-btn ev-tb-fmt-painter" data-ev-tip="${__("Format Painter")}">
+							<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M3 0a1 1 0 0 0-1 1v1H1a1 1 0 0 0 0 2h1v10a1 1 0 0 0 2 0V4h1a3 3 0 0 0 3-3V0H3zm0 2V1h5v0a1 1 0 0 1-1 1H3zM9 5a3 3 0 0 1 3 3v4h1a1 1 0 0 1 0 2h-4a1 1 0 0 1 0-2h1V8a1 1 0 0 0-1-1H9V5z"/></svg>
+						</button>
+						<button class="ev-tb-btn ev-cf-open-btn" data-ev-tip="${__("Conditional Formatting")}">
+							<svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="1" width="5" height="5" rx="1" fill="#e06c6c"/><rect x="8" y="1" width="5" height="5" rx="1" fill="#70b870"/><rect x="1" y="8" width="5" height="5" rx="1" fill="#70b870"/><rect x="8" y="8" width="5" height="5" rx="1" fill="#4c8abf"/></svg>
+						</button>
+					</div>
 
-						${this._grp(__("Alignment"), `
-							<div class="ev-align-row">
-								<button class="ev-tb-btn ev-fmt-btn" data-fmt="valignTop" title="${__("Align Top")}">
-									<svg width="15" height="15" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="1" width="12" height="1.5" rx="0.5"/><rect x="3" y="3.5" width="3" height="8" rx="0.5"/><rect x="8" y="3.5" width="3" height="5" rx="0.5"/></svg>
-								</button>
-								<button class="ev-tb-btn ev-fmt-btn" data-fmt="valignMiddle" title="${__("Align Middle")}">
-									<svg width="15" height="15" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="6.25" width="12" height="1.5" rx="0.5"/><rect x="3" y="2" width="3" height="10" rx="0.5"/><rect x="8" y="3.5" width="3" height="7" rx="0.5"/></svg>
-								</button>
-								<button class="ev-tb-btn ev-fmt-btn" data-fmt="valignBottom" title="${__("Align Bottom")}">
-									<svg width="15" height="15" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="11.5" width="12" height="1.5" rx="0.5"/><rect x="3" y="2" width="3" height="8" rx="0.5"/><rect x="8" y="4.5" width="3" height="5" rx="0.5"/></svg>
-								</button>
-								<button class="ev-tb-btn ev-fmt-btn" data-fmt="wrap" title="${__("Wrap Text")}">
-									<svg width="15" height="15" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="2" width="12" height="1.5" rx="0.5"/><rect x="1" y="6" width="8" height="1.5" rx="0.5"/><path d="M10 4.5v5l2-2.5-2-2.5z"/><rect x="1" y="10" width="12" height="1.5" rx="0.5"/></svg>
-								</button>
-								<button class="ev-tb-btn ev-indent-decrease" title="${__("Decrease Indent")}">
-									<svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="2" width="12" height="1.5" rx="0.5"/><rect x="1" y="6" width="9" height="1.5" rx="0.5"/><rect x="1" y="10" width="12" height="1.5" rx="0.5"/><path d="M11 5l2 2-2 2V5z"/></svg>
-								</button>
-								<button class="ev-tb-btn ev-indent-increase" title="${__("Increase Indent")}">
-									<svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="2" width="12" height="1.5" rx="0.5"/><rect x="4" y="6" width="9" height="1.5" rx="0.5"/><rect x="1" y="10" width="12" height="1.5" rx="0.5"/><path d="M1 5l2 2-2 2V5z"/></svg>
-								</button>
-							</div>
-							<div class="ev-align-row2">
-								<button class="ev-tb-btn ev-fmt-btn" data-fmt="alignLeft" title="${__("Align Left")}">
-									<span class="ev-align-icon ev-align-left"></span>
-								</button>
-								<button class="ev-tb-btn ev-fmt-btn" data-fmt="alignCenter" title="${__("Align Center")}">
-									<span class="ev-align-icon ev-align-center"></span>
-								</button>
-								<button class="ev-tb-btn ev-fmt-btn" data-fmt="alignRight" title="${__("Align Right")}">
-									<span class="ev-align-icon ev-align-right"></span>
-								</button>
-								<div class="ev-merge-wrap">
-									<button class="ev-tb-btn ev-merge-btn" title="${__("Merge & Center")}">
-										<svg width="13" height="13" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="1" width="5" height="12" rx="1" opacity=".35"/><rect x="8" y="1" width="5" height="12" rx="1" opacity=".35"/><path d="M4 6.5l-2 1.5 2 1.5V8h6v1.5l2-1.5-2-1.5V8H4z"/></svg>
-									</button>
-									<button class="ev-tb-btn ev-merge-dropdown-arrow" title="${__("Merge options")}"><span style="font-size:9px">▾</span></button>
-									<div class="ev-merge-popup hide">
-										<div class="ev-border-item" data-merge="center">${__("Merge & Center")}</div>
-										<div class="ev-border-item" data-merge="across">${__("Merge Across")}</div>
-										<div class="ev-border-item" data-merge="cells">${__("Merge Cells")}</div>
-										<div class="ev-border-sep"></div>
-										<div class="ev-border-item" data-merge="unmerge">${__("Unmerge Cells")}</div>
-									</div>
-								</div>
-							</div>
-						`)}
-
-						${this._grp(__("Number"), `
-							<div class="ev-num-row">
-								<select class="ev-tb-select ev-numfmt-select" title="${__("Number Format")}">
-									<option value="general">${__("General")}</option>
-									<option value="number">${__("Number")}</option>
-									<option value="currency">${__("Currency")}</option>
-									<option value="accounting">${__("Accounting")}</option>
-									<option value="short_date">${__("Short Date")}</option>
-									<option value="percentage">${__("Percentage")}</option>
-									<option value="fraction">${__("Fraction")}</option>
-									<option value="scientific">${__("Scientific")}</option>
-									<option value="text">${__("Text")}</option>
-								</select>
-							</div>
-							<div class="ev-num-row2">
-								<button class="ev-tb-btn ev-num-currency" title="${__("Currency")}"><b>$</b></button>
-								<button class="ev-tb-btn ev-num-percent ev-fmt-btn" data-fmt="numfmt_pct" title="${__("Percent Style")}"><b>%</b></button>
-								<button class="ev-tb-btn ev-num-comma" title="${__("Comma Style")}"><b>,</b></button>
-								<button class="ev-tb-btn ev-num-inc-dec" data-decimal="inc" title="${__("Increase Decimal")}"><svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><text x="0" y="12" font-size="10">.0</text><text x="9" y="9" font-size="8">+</text></svg></button>
-								<button class="ev-tb-btn ev-num-inc-dec" data-decimal="dec" title="${__("Decrease Decimal")}"><svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><text x="0" y="12" font-size="10">.0</text><text x="9" y="9" font-size="8">–</text></svg></button>
-							</div>
-						`)}
-
-						${this._grp(__("Styles"), `
-							<button class="ev-tb-btn ev-tb-btn--lg ev-cf-open-btn" title="${__("Conditional Formatting")}">
-								<svg class="ev-btn-icon" width="20" height="20" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="1" width="5" height="5" rx="1" fill="#e06c6c"/><rect x="8" y="1" width="5" height="5" rx="1" fill="#70b870"/><rect x="1" y="8" width="5" height="5" rx="1" fill="#70b870"/><rect x="8" y="8" width="5" height="5" rx="1" fill="#4c8abf"/></svg>
-								<span class="ev-btn-label">${__("Conditional Formatting")}</span>
-							</button>
-						`)}
-
-					</div><!-- /home pane -->
-
-					<!-- INSERT TAB ───────────────────────────────────────────── -->
+					<!-- INSERT TAB ──────────────────────────────────────────── -->
 					<div class="ev-tab-pane" data-tab="insert">
-
-						${this._grp(__("Charts"), `
-							<button class="ev-tb-btn ev-tb-btn--lg ev-chart-btn" data-chart="bar" title="${__("Bar Chart")}">
-								<svg class="ev-btn-icon" width="20" height="20" viewBox="0 0 16 14" fill="currentColor"><rect x="1" y="4" width="3" height="10"/><rect x="5" y="2" width="3" height="12"/><rect x="9" y="6" width="3" height="8"/><rect x="13" y="0" width="3" height="14"/></svg>
-								<span class="ev-btn-label">${__("Bar")}</span>
-							</button>
-							<button class="ev-tb-btn ev-tb-btn--lg ev-chart-btn" data-chart="line" title="${__("Line Chart")}">
-								<svg class="ev-btn-icon" width="20" height="20" viewBox="0 0 16 14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1,12 5,6 9,9 13,2 16,5"/></svg>
-								<span class="ev-btn-label">${__("Line")}</span>
-							</button>
-							<button class="ev-tb-btn ev-tb-btn--lg ev-chart-btn" data-chart="pie" title="${__("Pie Chart")}">
-								<svg class="ev-btn-icon" width="20" height="20" viewBox="0 0 14 14" fill="currentColor"><path d="M7 7V1a6 6 0 0 1 6 6z" fill="#4c8abf"/><path d="M7 7H1a6 6 0 0 0 6 6z" fill="#70b870"/><path d="M7 7L1 7A6 6 0 0 1 7 1z" fill="#e06c6c"/><path d="M7 7l6 0A6 6 0 0 1 7 13z" fill="#f0a030"/></svg>
-								<span class="ev-btn-label">${__("Pie")}</span>
-							</button>
-							<button class="ev-tb-btn ev-tb-btn--lg ev-chart-btn" data-chart="donut" title="${__("Donut Chart")}">
-								<svg class="ev-btn-icon" width="20" height="20" viewBox="0 0 14 14" fill="currentColor"><circle cx="7" cy="7" r="6" fill="none" stroke="#4c8abf" stroke-width="3.5" stroke-dasharray="18 20"/><circle cx="7" cy="7" r="2.5" fill="white"/></svg>
-								<span class="ev-btn-label">${__("Donut")}</span>
-							</button>
-							<button class="ev-tb-btn ev-tb-btn--lg ev-chart-btn" data-chart="scatter" title="${__("Scatter Chart")}">
-								<svg class="ev-btn-icon" width="20" height="20" viewBox="0 0 14 14" fill="#4c8abf"><circle cx="3" cy="10" r="1.8"/><circle cx="6" cy="6" r="1.8"/><circle cx="9" cy="8" r="1.8"/><circle cx="11" cy="3" r="1.8"/><circle cx="4" cy="3" r="1.8"/></svg>
-								<span class="ev-btn-label">${__("Scatter")}</span>
-							</button>
-						`)}
-
-						${this._grp(__("Tables"), `
-							<button class="ev-tb-btn ev-tb-btn--lg ev-pivot-btn" title="${__("PivotTable")}">
-								<svg class="ev-btn-icon" width="20" height="20" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="1" width="5" height="5" rx="1" opacity=".5"/><rect x="8" y="1" width="5" height="5" rx="1" opacity=".9"/><rect x="1" y="8" width="5" height="5" rx="1" opacity=".9"/><rect x="8" y="8" width="5" height="5" rx="1" opacity=".45"/></svg>
-								<span class="ev-btn-label">${__("PivotTable")}</span>
-							</button>
-						`)}
-
-						${this._grp(__("Dashboard"), `
-							<button class="ev-tb-btn ev-tb-btn--lg ev-dash-numcard-btn" title="${__("Add Number Card to dashboard")}">
-								<span class="ev-tb-icon">🔢</span>
-								<span class="ev-btn-label">${__("Number Card")}</span>
-							</button>
-							<button class="ev-tb-btn ev-tb-btn--lg ev-dash-chart-btn" title="${__("Add Chart to dashboard")}">
-								<span class="ev-tb-icon">📊</span>
-								<span class="ev-btn-label">${__("Chart")}</span>
-							</button>
-							<button class="ev-tb-btn ev-tb-btn--lg ev-dash-date-btn" title="${__("Add Date Filter to dashboard")}">
-								<span class="ev-tb-icon">📅</span>
-								<span class="ev-btn-label">${__("Date Filter")}</span>
-							</button>
-						`)}
-
+						<!-- Charts -->
+						<button class="ev-tb-btn ev-chart-btn" data-chart="bar" data-ev-tip="${__("Bar Chart")}">
+							<svg width="14" height="14" viewBox="0 0 16 14" fill="currentColor"><rect x="1" y="4" width="3" height="10"/><rect x="5" y="2" width="3" height="12"/><rect x="9" y="6" width="3" height="8"/><rect x="13" y="0" width="3" height="14"/></svg>
+						</button>
+						<button class="ev-tb-btn ev-chart-btn" data-chart="line" data-ev-tip="${__("Line Chart")}">
+							<svg width="14" height="14" viewBox="0 0 16 14" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1,12 5,6 9,9 13,2 16,5"/></svg>
+						</button>
+						<button class="ev-tb-btn ev-chart-btn" data-chart="pie" data-ev-tip="${__("Pie Chart")}">
+							<svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><path d="M7 7V1a6 6 0 0 1 6 6z" fill="#4c8abf"/><path d="M7 7H1a6 6 0 0 0 6 6z" fill="#70b870"/><path d="M7 7L1 7A6 6 0 0 1 7 1z" fill="#e06c6c"/><path d="M7 7l6 0A6 6 0 0 1 7 13z" fill="#f0a030"/></svg>
+						</button>
+						<button class="ev-tb-btn ev-chart-btn" data-chart="donut" data-ev-tip="${__("Donut Chart")}">
+							<svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><circle cx="7" cy="7" r="6" fill="none" stroke="#4c8abf" stroke-width="3.5" stroke-dasharray="18 20"/><circle cx="7" cy="7" r="2.5" fill="white"/></svg>
+						</button>
+						<button class="ev-tb-btn ev-chart-btn" data-chart="scatter" data-ev-tip="${__("Scatter Chart")}">
+							<svg width="14" height="14" viewBox="0 0 14 14" fill="#4c8abf"><circle cx="3" cy="10" r="1.8"/><circle cx="6" cy="6" r="1.8"/><circle cx="9" cy="8" r="1.8"/><circle cx="11" cy="3" r="1.8"/><circle cx="4" cy="3" r="1.8"/></svg>
+						</button>
+						<div class="ev-tb-sep"></div>
+						<button class="ev-tb-btn ev-pivot-btn" data-ev-tip="${__("Insert PivotTable")}">
+							<svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="1" width="5" height="5" rx="1" opacity=".5"/><rect x="8" y="1" width="5" height="5" rx="1" opacity=".9"/><rect x="1" y="8" width="5" height="5" rx="1" opacity=".9"/><rect x="8" y="8" width="5" height="5" rx="1" opacity=".45"/></svg>
+						</button>
+						<div class="ev-tb-sep"></div>
+						<button class="ev-tb-btn ev-dash-numcard-btn" data-ev-tip="${__("Add Number Card to dashboard")}">
+							<svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="4" width="12" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.3"/><text x="4" y="10" font-size="6" font-weight="600">#</text></svg>
+						</button>
+						<button class="ev-tb-btn ev-dash-chart-btn" data-ev-tip="${__("Add Chart to dashboard")}">
+							<svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="6" width="2.5" height="7" opacity=".7"/><rect x="5" y="3" width="2.5" height="10" opacity=".9"/><rect x="9" y="8" width="2.5" height="5" opacity=".7"/></svg>
+						</button>
+						<button class="ev-tb-btn ev-dash-date-btn" data-ev-tip="${__("Add Date Filter to dashboard")}">
+							<svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="3" width="12" height="10" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.2"/><line x1="1" y1="6" x2="13" y2="6" stroke="currentColor" stroke-width="1.2"/><rect x="4" y="1" width="1.5" height="3.5" rx="0.7"/><rect x="8.5" y="1" width="1.5" height="3.5" rx="0.7"/></svg>
+						</button>
 					</div><!-- /insert pane -->
 
-					<!-- FORMULAS TAB ─────────────────────────────────────────── -->
+					<!-- FORMULAS TAB (hidden — tab not shown in strip) ──────── -->
 					<div class="ev-tab-pane" data-tab="formulas">
-
-						${this._grp(__("Function Library"), `
-							<button class="ev-tb-btn ev-tb-btn--lg ev-autosum-btn" title="${__("AutoSum")}">
-								<span class="ev-btn-icon ev-fn-sigma">Σ</span>
-								<span class="ev-btn-label">${__("AutoSum")} ▾</span>
-							</button>
-							${this._fn_group_btn("financial", `<svg class="ev-btn-icon" width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><text x="2" y="12" font-size="12" font-weight="bold">$</text></svg>`, __("Financial"), ["FRAPPE_SUM","FRAPPE_AVG","FRAPPE_COUNT","GL_BALANCE","ITEM_PRICE","STOCK_QTY"])}
-							${this._fn_group_btn("logical", `<svg class="ev-btn-icon" width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><text x="1" y="13" font-size="11" font-weight="600">IF</text></svg>`, __("Logical"), ["IF","AND","OR","NOT","IFERROR","IFS"])}
-							${this._fn_group_btn("text", `<svg class="ev-btn-icon" width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><text x="0" y="13" font-size="12" font-weight="600">Aα</text></svg>`, __("Text"), ["CONCAT","LEFT","RIGHT","MID","UPPER","LOWER","LEN","TRIM"])}
-							${this._fn_group_btn("date", `<svg class="ev-btn-icon" width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="3" width="14" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.3"/><line x1="1" y1="7" x2="15" y2="7" stroke="currentColor" stroke-width="1.3"/><rect x="4" y="1" width="2" height="4" rx="1"/><rect x="10" y="1" width="2" height="4" rx="1"/></svg>`, __("Date & Time"), ["TODAY","NOW","DATE","YEAR","MONTH","DAY","DAYS","NETWORKDAYS"])}
-							${this._fn_group_btn("lookup", `<svg class="ev-btn-icon" width="20" height="20" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="6.5" cy="6.5" r="4"/><line x1="9.5" y1="9.5" x2="14" y2="14"/></svg>`, __("Lookup"), ["VLOOKUP","HLOOKUP","INDEX","MATCH","FRAPPE_GET"])}
-							${this._fn_group_btn("math", `<svg class="ev-btn-icon" width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><text x="1" y="13" font-size="14">∑</text></svg>`, __("Math"), ["ROUND","ABS","FLOOR","CEILING","MOD","POWER","SUMIF","COUNTIF"])}
-						`)}
-
-						${this._grp(__("Formula Auditing"), `
-							<button class="ev-tb-btn ev-tb-btn--lg ev-show-formulas-btn" title="${__("Show Formulas")}">
-								<svg class="ev-btn-icon" width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><path d="M10.5 8a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0z"/><path d="M0 8s3-5.5 8-5.5S16 8 16 8s-3 5.5-8 5.5S0 8 0 8zm8 3.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z"/></svg>
-								<span class="ev-btn-label">${__("Show Formulas")}</span>
-							</button>
-						`)}
-
-						${this._grp(__("Name Manager"), `
-							<button class="ev-tb-btn ev-tb-btn--lg ev-name-manager-btn" title="${__("Name Manager")}">
-								<svg class="ev-btn-icon" width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><path d="M6.5 1a.5.5 0 0 0 0 1h3a.5.5 0 0 0 0-1h-3zM3 2.5A1.5 1.5 0 0 1 4.5 1H6a.5.5 0 0 0 0-1H4.5A2.5 2.5 0 0 0 2 2.5v11A2.5 2.5 0 0 0 4.5 16h7A2.5 2.5 0 0 0 14 13.5v-11A2.5 2.5 0 0 0 11.5 0H10a.5.5 0 0 0 0 1h1.5A1.5 1.5 0 0 1 13 2.5v11A1.5 1.5 0 0 1 11.5 15h-7A1.5 1.5 0 0 1 3 13.5v-11z"/><rect x="5" y="6" width="6" height="1"/><rect x="5" y="9" width="6" height="1"/><rect x="5" y="12" width="4" height="1"/></svg>
-								<span class="ev-btn-label">${__("Names")}</span>
-							</button>
-						`)}
-
+						<button class="ev-tb-btn ev-autosum-btn" data-ev-tip="${__("AutoSum (Alt+=)")}">
+							<span class="ev-fn-sigma">Σ</span>
+						</button>
+						<div class="ev-tb-sep"></div>
+						${this._fn_group_btn("financial", `<b>$</b>`, __("Financial"), ["FRAPPE_SUM","FRAPPE_AVG","FRAPPE_COUNT","GL_BALANCE","ITEM_PRICE","STOCK_QTY"])}
+						${this._fn_group_btn("logical", `<b>IF</b>`, __("Logical"), ["IF","AND","OR","NOT","IFERROR","IFS"])}
+						${this._fn_group_btn("text", `<b>Aα</b>`, __("Text"), ["CONCAT","LEFT","RIGHT","MID","UPPER","LOWER","LEN","TRIM"])}
+						${this._fn_group_btn("date", `<svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="3" width="14" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.3"/><line x1="1" y1="7" x2="15" y2="7" stroke="currentColor" stroke-width="1.3"/><rect x="4" y="1" width="2" height="4" rx="1"/><rect x="10" y="1" width="2" height="4" rx="1"/></svg>`, __("Date"), ["TODAY","NOW","DATE","YEAR","MONTH","DAY","DAYS","NETWORKDAYS"])}
+						${this._fn_group_btn("lookup", `<svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="6.5" cy="6.5" r="4"/><line x1="9.5" y1="9.5" x2="14" y2="14"/></svg>`, __("Lookup"), ["VLOOKUP","HLOOKUP","INDEX","MATCH","FRAPPE_GET"])}
+						${this._fn_group_btn("math", `<b>∑</b>`, __("Math"), ["ROUND","ABS","FLOOR","CEILING","MOD","POWER","SUMIF","COUNTIF"])}
+						<div class="ev-tb-sep"></div>
+						<button class="ev-tb-btn ev-show-formulas-btn" data-ev-tip="${__("Show Formulas")}">
+							<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M10.5 8a2.5 2.5 0 1 1-5 0 2.5 2.5 0 0 1 5 0z"/><path d="M0 8s3-5.5 8-5.5S16 8 16 8s-3 5.5-8 5.5S0 8 0 8zm8 3.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z"/></svg>
+						</button>
+						<button class="ev-tb-btn ev-name-manager-btn" data-ev-tip="${__("Name Manager")}">
+							<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M6.5 1a.5.5 0 0 0 0 1h3a.5.5 0 0 0 0-1h-3zM3 2.5A1.5 1.5 0 0 1 4.5 1H6a.5.5 0 0 0 0-1H4.5A2.5 2.5 0 0 0 2 2.5v11A2.5 2.5 0 0 0 4.5 16h7A2.5 2.5 0 0 0 14 13.5v-11A2.5 2.5 0 0 0 11.5 0H10a.5.5 0 0 0 0 1h1.5A1.5 1.5 0 0 1 13 2.5v11A1.5 1.5 0 0 1 11.5 15h-7A1.5 1.5 0 0 1 3 13.5v-11z"/><rect x="5" y="6" width="6" height="1"/><rect x="5" y="9" width="6" height="1"/><rect x="5" y="12" width="4" height="1"/></svg>
+						</button>
 					</div><!-- /formulas pane -->
 
 					<!-- DATA TAB ─────────────────────────────────────────────── -->
 					<div class="ev-tab-pane" data-tab="data">
 
-						${this._grp(__("External Data"), `
-							<div class="ev-getdata-wrap">
-								<button class="ev-tb-btn ev-tb-btn--lg ev-get-data-btn" title="${__("Import data from Reports, Google Sheets, CSV, JSON, PDF or Web API")}">
-									<svg class="ev-btn-icon" width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/><path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708l3 3z"/></svg>
-									<span class="ev-btn-label">${__("Get Data")} ▾</span>
-								</button>
-							</div>
-							<button class="ev-tb-btn ev-tb-btn--lg ev-smart-lookup-btn" data-rs-panel="smart_lookup" title="${__('Suggest join columns between sheets using field metadata, header similarity, and data overlap')}">
-								<svg class="ev-btn-icon" width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><path d="M11.5 2a.5.5 0 0 1 .5.5v11a.5.5 0 0 1-1 0v-11a.5.5 0 0 1 .5-.5zm-3 3a.5.5 0 0 1 .5.5v8a.5.5 0 0 1-1 0v-8a.5.5 0 0 1 .5-.5zm-3 3a.5.5 0 0 1 .5.5v5a.5.5 0 0 1-1 0v-5a.5.5 0 0 1 .5-.5zm-3 3a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-1 0v-2a.5.5 0 0 1 .5-.5z"/></svg>
-								<span class="ev-btn-label">${__("Smart Lookup")}</span>
+						<!-- Data -->
+						<div class="ev-getdata-wrap">
+							<button class="ev-tb-btn ev-get-data-btn" data-ev-tip="${__("Get Data — import from Reports, CSV, JSON, PDF, Web API")}">
+								<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/><path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708l3 3z"/></svg>
+								<svg width="7" height="7" viewBox="0 0 8 8" fill="currentColor"><path d="M1 2l3 3 3-3"/></svg>
 							</button>
-						`)}
-
-						${this._grp(__("Filter"), `
-							<button class="ev-tb-btn ev-tb-btn--lg ev-filter-toggle-btn" title="${__("Toggle Filters")}">
-								<svg class="ev-btn-icon" width="20" height="20" viewBox="0 0 14 14" fill="currentColor"><path d="M1 3h12v1.5L9 9v4l-4-2V9L1 4.5z" opacity=".85"/></svg>
-								<span class="ev-btn-label">${__("Filter")}</span>
-							</button>
-						`)}
-
-						${this._grp(__("Records"), `
-							<button class="ev-tb-btn ev-tb-btn--lg ev-duplicate-record-btn" title="${__("Duplicate selected row(s) as new record(s)")}">
-								<svg class="ev-btn-icon" width="20" height="20" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="4" width="7" height="9" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="4" y="1" width="7" height="9" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/><line x1="7" y1="4" x2="7" y2="9" stroke="currentColor" stroke-width="1.3"/><line x1="4.5" y1="6.5" x2="9.5" y2="6.5" stroke="currentColor" stroke-width="1.3"/></svg>
-								<span class="ev-btn-label">${__("Duplicate")}</span>
-							</button>
-							<button class="ev-tb-btn ev-tb-btn--lg ev-insert-record-btn" title="${__("Insert new record with smart defaults")}">
-								<svg class="ev-btn-icon" width="20" height="20" viewBox="0 0 14 14" fill="#2e7d32"><rect x="6" y="1" width="2" height="12" rx="1"/><rect x="1" y="6" width="12" height="2" rx="1"/></svg>
-								<span class="ev-btn-label">${__("Insert")}</span>
-							</button>
-							<button class="ev-tb-btn ev-tb-btn--lg ev-delete-records-btn" title="${__("Delete Selected Records")}">
-								<svg class="ev-btn-icon" width="20" height="20" viewBox="0 0 14 14" fill="none" stroke="#c62828" stroke-width="1.3" stroke-linejoin="round"><path d="M2 4h10l-1 8H3L2 4zm4 2v5m2-5v5M5 2h4l1 2H4z"/></svg>
-								<span class="ev-btn-label" style="color:#c62828">${__("Delete")}</span>
-							</button>
-							<button class="ev-tb-btn ev-tb-btn--lg ev-bulk-add-btn" title="${__("Add multiple blank rows and create records in bulk — paste from Excel/Sheets")}">
-								<svg class="ev-btn-icon" width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><path d="M8 2a.5.5 0 0 1 .5.5v5h5a.5.5 0 0 1 0 1h-5v5a.5.5 0 0 1-1 0v-5h-5a.5.5 0 0 1 0-1h5v-5A.5.5 0 0 1 8 2z"/></svg>
-								<span class="ev-btn-label">${__("Bulk Add")}</span>
-							</button>
-							<button class="ev-tb-btn ev-tb-btn--lg ev-bulk-import-btn" title="${__("Import rows from CSV, Report or any Get Data source into this DocType")}">
-								<svg class="ev-btn-icon" width="20" height="20" viewBox="0 0 16 16" fill="currentColor"><path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/><path d="M7.646 1.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1-.708.708L8.5 2.707V11.5a.5.5 0 0 1-1 0V2.707L5.354 4.854a.5.5 0 1 0-.708-.708l3-3z"/></svg>
-								<span class="ev-btn-label">${__("Bulk Import")}</span>
-							</button>
-						`)}
-
+						</div>
+						<button class="ev-tb-btn ev-smart-lookup-btn" data-rs-panel="smart_lookup" data-ev-tip="${__("Smart Lookup — suggest join columns between sheets")}">
+							<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M11.5 2a.5.5 0 0 1 .5.5v11a.5.5 0 0 1-1 0v-11a.5.5 0 0 1 .5-.5zm-3 3a.5.5 0 0 1 .5.5v8a.5.5 0 0 1-1 0v-8a.5.5 0 0 1 .5-.5zm-3 3a.5.5 0 0 1 .5.5v5a.5.5 0 0 1-1 0v-5a.5.5 0 0 1 .5-.5zm-3 3a.5.5 0 0 1 .5.5v2a.5.5 0 0 1-1 0v-2a.5.5 0 0 1 .5-.5z"/></svg>
+						</button>
+						<div class="ev-tb-sep"></div>
+						<button class="ev-tb-btn ev-filter-toggle-btn" data-ev-tip="${__("Toggle Filters")}">
+							<svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><path d="M1 3h12v1.5L9 9v4l-4-2V9L1 4.5z" opacity=".85"/></svg>
+						</button>
+						<div class="ev-tb-sep"></div>
+						<button class="ev-tb-btn ev-insert-record-btn" data-ev-tip="${__("Insert new record")}">
+							<svg width="14" height="14" viewBox="0 0 14 14" fill="#2e7d32"><rect x="6" y="1" width="2" height="12" rx="1"/><rect x="1" y="6" width="12" height="2" rx="1"/></svg>
+						</button>
+						<button class="ev-tb-btn ev-duplicate-record-btn" data-ev-tip="${__("Duplicate selected row(s)")}">
+							<svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="4" width="7" height="9" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/><rect x="4" y="1" width="7" height="9" rx="1" fill="none" stroke="currentColor" stroke-width="1.3"/><line x1="7" y1="4" x2="7" y2="9" stroke="currentColor" stroke-width="1.3"/><line x1="4.5" y1="6.5" x2="9.5" y2="6.5" stroke="currentColor" stroke-width="1.3"/></svg>
+						</button>
+						<button class="ev-tb-btn ev-delete-records-btn" data-ev-tip="${__("Delete selected records")}">
+							<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="#c62828" stroke-width="1.3" stroke-linejoin="round"><path d="M2 4h10l-1 8H3L2 4zm4 2v5m2-5v5M5 2h4l1 2H4z"/></svg>
+						</button>
+						<div class="ev-tb-sep"></div>
+						<button class="ev-tb-btn ev-bulk-add-btn" data-ev-tip="${__("Bulk Add — add multiple blank rows")}">
+							<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 2a.5.5 0 0 1 .5.5v5h5a.5.5 0 0 1 0 1h-5v5a.5.5 0 0 1-1 0v-5h-5a.5.5 0 0 1 0-1h5v-5A.5.5 0 0 1 8 2z"/></svg>
+						</button>
+						<button class="ev-tb-btn ev-bulk-import-btn" data-ev-tip="${__("Bulk Import — import rows from CSV or report")}">
+							<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/><path d="M7.646 1.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1-.708.708L8.5 2.707V11.5a.5.5 0 0 1-1 0V2.707L5.354 4.854a.5.5 0 1 0-.708-.708l3-3z"/></svg>
+						</button>
+						${frappe.user.has_role("System Manager") ? `
+						<div class="ev-tb-sep"></div>
+						<button class="ev-tb-btn ev-perm-btn" data-rs-panel="permissions"
+								data-ev-tip="${__("Manage permissions")}">
+							<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+								<path d="M8 1a4 4 0 1 1 0 8A4 4 0 0 1 8 1zm0 1a3 3 0 1 0 0 6A3 3 0 0 0 8 2z"/>
+								<path d="M3 14s-1 0-1-1 1-4 6-4 6 3 6 4-1 1-1 1H3zm1.001-1h8l-.001-.02c-.01-.266-.108-.994-.629-1.66C10.925 10.72 9.87 10 8 10c-1.87 0-2.925.72-3.37 1.32-.521.666-.619 1.394-.629 1.66z"/>
+							</svg>
+						</button>` : ""}
 					</div><!-- /data pane -->
 
-					<!-- VIEW TAB ─────────────────────────────────────────────── -->
+					<!-- VIEW TAB ──────────────────────────────────────────────── -->
 					<div class="ev-tab-pane" data-tab="view">
-
-						${this._grp(__("Freeze"), `
-							<div class="ev-freeze-wrap">
-								<button class="ev-tb-btn ev-tb-btn--lg ev-freeze-trigger" title="${__("Freeze Panes")}">
-									<svg class="ev-btn-icon" width="20" height="20" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="7" y1="1" x2="7" y2="13"/><line x1="1" y1="5" x2="13" y2="5"/><line x1="5" y1="3" x2="9" y2="3"/><line x1="5" y1="11" x2="9" y2="11"/></svg>
-									<span class="ev-btn-label">${__("Freeze Panes")} ▾</span>
-								</button>
-								<div class="ev-border-popup ev-freeze-popup hide">
-									<div class="ev-border-item" data-freeze="first_col">${__("Freeze First Column")}</div>
-									<div class="ev-border-item" data-freeze="first_row">${__("Freeze First Row")}</div>
-									<div class="ev-border-item" data-freeze="selection">${__("Freeze at Selection")}</div>
-									<div class="ev-border-sep"></div>
-									<div class="ev-border-item" data-freeze="unfreeze">${__("Unfreeze All")}</div>
-								</div>
-							</div>
-						`)}
-
-						${this._grp(__("Show"), `
-							<button class="ev-tb-btn ev-tb-btn--lg ev-gridlines-btn" title="${__("Toggle Gridlines")}">
-								<svg class="ev-btn-icon" width="20" height="20" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1"><rect x="1" y="1" width="12" height="12"/><line x1="5" y1="1" x2="5" y2="13"/><line x1="9" y1="1" x2="9" y2="13"/><line x1="1" y1="5" x2="13" y2="5"/><line x1="1" y1="9" x2="13" y2="9"/></svg>
-								<span class="ev-btn-label ev-gridlines-label">${__("Gridlines")}</span>
+						<div class="ev-freeze-wrap">
+							<button class="ev-tb-btn ev-freeze-trigger" data-ev-tip="${__("Freeze Panes")}">
+								<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="7" y1="1" x2="7" y2="13"/><line x1="1" y1="5" x2="13" y2="5"/><line x1="5" y1="3" x2="9" y2="3"/><line x1="5" y1="11" x2="9" y2="11"/></svg>
+								<svg width="7" height="7" viewBox="0 0 8 8" fill="currentColor"><path d="M1 2l3 3 3-3"/></svg>
 							</button>
-							<input type="checkbox" class="ev-gridlines-toggle" checked style="display:none">
-						`)}
-
-
-						${this._grp(__("Focus"), `
-							<button class="ev-tb-btn ev-tb-btn--lg ev-focus-toggle" title="${__("Toggle Focus Cell Crosshair")}">
-								<svg class="ev-btn-icon" width="20" height="20" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2"><line x1="7" y1="1" x2="7" y2="13"/><line x1="1" y1="7" x2="13" y2="7"/><circle cx="7" cy="7" r="2" fill="currentColor" stroke="none"/></svg>
-								<span class="ev-btn-label ev-focus-label">${__("Focus Cell")}</span>
-							</button>
-							<div class="ev-focus-color-wrap">
-								<button class="ev-tb-btn ev-focus-color-btn" title="${__("Focus Color")}">
-									<span class="ev-focus-color-swatch" style="background:#217346"></span>
-								</button>
+							<div class="ev-border-popup ev-freeze-popup hide">
+								<div class="ev-border-item" data-freeze="first_col">${__("Freeze First Column")}</div>
+								<div class="ev-border-item" data-freeze="first_row">${__("Freeze First Row")}</div>
+								<div class="ev-border-item" data-freeze="selection">${__("Freeze at Selection")}</div>
+								<div class="ev-border-sep"></div>
+								<div class="ev-border-item" data-freeze="unfreeze">${__("Unfreeze All")}</div>
 							</div>
-						`)}
+						</div>
+						<div class="ev-tb-sep"></div>
+						<button class="ev-tb-btn ev-gridlines-btn" data-ev-tip="${__("Toggle Gridlines")}">
+							<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1"><rect x="1" y="1" width="12" height="12"/><line x1="5" y1="1" x2="5" y2="13"/><line x1="9" y1="1" x2="9" y2="13"/><line x1="1" y1="5" x2="13" y2="5"/><line x1="1" y1="9" x2="13" y2="9"/></svg>
+						</button>
+						<input type="checkbox" class="ev-gridlines-toggle" checked style="display:none">
+						<div class="ev-tb-sep"></div>
+						<button class="ev-tb-btn ev-focus-toggle" data-ev-tip="${__("Toggle Focus Crosshair")}">
+							<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.2"><line x1="7" y1="1" x2="7" y2="13"/><line x1="1" y1="7" x2="13" y2="7"/><circle cx="7" cy="7" r="2" fill="currentColor" stroke="none"/></svg>
+						</button>
+						<div class="ev-focus-color-wrap">
+							<button class="ev-tb-btn ev-focus-color-btn" data-ev-tip="${__("Focus Color")}">
+								<span class="ev-focus-color-swatch" style="background:#217346"></span>
+							</button>
+						</div>
 					</div><!-- /view pane -->
 
-				</div><!-- /ev-ribbon-content -->
+					<!-- Spacer pushes right section to far right -->
+					<div class="ev-tb-spacer"></div>
+
+					<!-- Right: quick access actions -->
+					<div class="ev-tb-right">
+						<!-- Flat icon-only utility buttons -->
+						<button class="ev-tb-btn ev-wb-views-btn" data-ev-tip="${__("Saved Views")}">
+							<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M1 3.5A1.5 1.5 0 0 1 2.5 2h2.764c.958 0 1.76.56 2.311 1.184C7.985 3.648 8.48 4 9 4h4.5A1.5 1.5 0 0 1 15 5.5v7a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 1 12.5v-9z"/></svg>
+						</button>
+						<button class="ev-tb-btn ev-columns-btn" data-ev-tip="${__("Choose Columns")}">
+							<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="1" width="4" height="14" rx="1"/><rect x="6" y="1" width="4" height="14" rx="1"/><rect x="11" y="1" width="4" height="14" rx="1"/></svg>
+						</button>
+						<button class="ev-tb-btn ev-join-btn" data-ev-tip="${__("Link Sheets")}">
+							<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="3" cy="8" r="2.2"/><circle cx="13" cy="3.5" r="2.2"/><circle cx="13" cy="12.5" r="2.2"/><line x1="5.1" y1="7.1" x2="10.9" y2="4.3"/><line x1="5.1" y1="8.9" x2="10.9" y2="11.7"/></svg>
+						</button>
+						<div class="ev-tb-sep"></div>
+						<!-- Period picker — compact pill with dynamic label -->
+						<div class="ev-period-wrap">
+							<button class="ev-tb-btn ev-tb-right-btn ev-period-btn" data-ev-tip="${__("Formula date period filter")}">
+								<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M11 6.5a.5.5 0 0 1 .5-.5h1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-1a.5.5 0 0 1-.5-.5v-1zm-3 0a.5.5 0 0 1 .5-.5h1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-1a.5.5 0 0 1-.5-.5v-1zm-5 3a.5.5 0 0 1 .5-.5h1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-1a.5.5 0 0 1-.5-.5v-1zm3 0a.5.5 0 0 1 .5-.5h1a.5.5 0 0 1 .5.5v1a.5.5 0 0 1-.5.5h-1a.5.5 0 0 1-.5-.5v-1zM3.5 0a.5.5 0 0 1 .5.5V1h8V.5a.5.5 0 0 1 1 0V1h1a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2h1V.5a.5.5 0 0 1 .5-.5zM2 2a1 1 0 0 0-1 1v1h14V3a1 1 0 0 0-1-1H2zm13 3H1v9a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V5z"/></svg>
+								<span class="ev-period-label">${__("This Month")}</span>
+								<svg width="7" height="7" viewBox="0 0 8 8" fill="currentColor"><path d="M1 2l3 3 3-3"/></svg>
+							</button>
+							<div class="ev-period-dropdown hide">
+								<div class="ev-period-item" data-period="today">${__("Today")}</div>
+								<div class="ev-period-item" data-period="this_week">${__("This Week")}</div>
+								<div class="ev-period-item ev-period-item--active" data-period="this_month">${__("This Month")}</div>
+								<div class="ev-period-item" data-period="last_month">${__("Last Month")}</div>
+								<div class="ev-period-item" data-period="this_quarter">${__("This Quarter")}</div>
+								<div class="ev-period-item" data-period="last_quarter">${__("Last Quarter")}</div>
+								<div class="ev-period-item" data-period="this_year">${__("This Year")}</div>
+								<div class="ev-period-item" data-period="last_year">${__("Last Year")}</div>
+								<div class="ev-period-sep"></div>
+								<div class="ev-period-item" data-period="custom">${__("Custom Range…")}</div>
+							</div>
+						</div>
+						<div class="ev-tb-sep"></div>
+						<!-- Save workbook -->
+						<div class="ev-wb-save-wrap">
+							<button class="ev-tb-btn ev-tb-save-btn ev-wb-save-btn" data-ev-tip="${__("Save View")}">
+								<svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor"><path d="M2 2a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V5.5L11.5 1H3a1 1 0 0 0-1 1zm0 1h9l3 3.5V13H2V3zm3 6h6v1H5v-1zm0-2h6v1H5V7z"/></svg>
+							</button>
+							<button class="ev-tb-btn ev-wb-deselect-btn hide" data-ev-tip="${__("Deselect workbook")}">×</button>
+							<button class="ev-tb-btn ev-wb-dropdown-arrow" data-ev-tip="${__("More options")}">
+								<svg width="7" height="7" viewBox="0 0 8 8" fill="currentColor"><path d="M1 2l3 3 3-3"/></svg>
+							</button>
+							<div class="ev-wb-dropdown hide">
+								<button class="ev-wb-dd-item" data-action="save_as">${__("Save As…")}</button>
+							</div>
+						</div>
+					</div><!-- /ev-tb-right -->
+
+				</div><!-- /ev-toolbar -->
 
 			</div><!-- /ev-toolbar-outer -->
 
@@ -422,17 +356,6 @@ frappe.views.excel.ExcelToolbar = class ExcelToolbar {
 		this.$border_popup = $(this.wrapper).find(".ev-border-main-popup");
 	}
 
-	// ── Helper: group wrapper with bottom label ───────────────────────────────
-
-	_grp(label, content) {
-		return `
-			<div class="ev-ribbon-group">
-				<div class="ev-ribbon-group-btns">${content}</div>
-				<div class="ev-ribbon-group-name">${label}</div>
-			</div>
-		`;
-	}
-
 	// ── Helper: function group dropdown button ────────────────────────────────
 
 	_fn_group_btn(id, icon_html, label, fns) {
@@ -441,9 +364,9 @@ frappe.views.excel.ExcelToolbar = class ExcelToolbar {
 		).join("");
 		return `
 			<div class="ev-fn-group-wrap" data-group="${id}">
-				<button class="ev-tb-btn ev-tb-btn--lg ev-fn-group-btn" title="${label}">
+				<button class="ev-tb-btn ev-fn-group-btn" data-ev-tip="${label}">
 					${icon_html}
-					<span class="ev-btn-label">${label} ▾</span>
+					<svg width="7" height="7" viewBox="0 0 8 8" fill="currentColor"><path d="M1 2l3 3 3-3"/></svg>
 				</button>
 				<div class="ev-border-popup ev-fn-popup hide">${items}</div>
 			</div>
@@ -559,9 +482,21 @@ frappe.views.excel.ExcelToolbar = class ExcelToolbar {
 		$w.on("click.ev-toolbar", ".ev-join-btn", () => this.board._open_join_canvas());
 
 		// ── Period picker ───────────────────────────────────────────────────
+		// Use position:fixed so the dropdown escapes ev-toolbar's overflow:auto clip.
 		$w.on("click", ".ev-period-btn", (e) => {
 			e.stopPropagation();
-			$w.find(".ev-period-dropdown").toggleClass("hide");
+			const $dd = $w.find(".ev-period-dropdown");
+			if (!$dd.hasClass("hide")) {
+				$dd.addClass("hide");
+				return;
+			}
+			const rect = e.currentTarget.getBoundingClientRect();
+			$dd.css({
+				position: "fixed",
+				top: rect.bottom + 3,
+				left: rect.left,
+				zIndex: 20000,
+			}).removeClass("hide");
 		});
 		$w.on("click", ".ev-period-item", (e) => {
 			const period = $(e.currentTarget).data("period");
@@ -593,7 +528,7 @@ frappe.views.excel.ExcelToolbar = class ExcelToolbar {
 			}
 			$w.find(".ev-period-dropdown").addClass("hide");
 		});
-		// Close dropdown on outside click
+		// Close on outside click
 		$(document).on("click.ev-period", () => $w.find(".ev-period-dropdown").addClass("hide"));
 
 		// ── Format toggle buttons (bold/italic/wrap/align/valign) ───────────
@@ -853,6 +788,7 @@ frappe.views.excel.ExcelToolbar = class ExcelToolbar {
 		// ── Data tab: Get Data ───────────────────────────────────────────────
 		$w.on("click", ".ev-get-data-btn", () => this._gd_open());
 		$w.on("click", ".ev-smart-lookup-btn", () => this._open_smart_lookup());
+		$w.on("click", ".ev-perm-btn", () => this._open_permission_panel());
 
 		// ── Data tab: Duplicate / Insert / Delete ───────────────────────────
 		$w.on("click", ".ev-duplicate-record-btn", () => this._duplicate_record());
@@ -1057,6 +993,48 @@ frappe.views.excel.ExcelToolbar = class ExcelToolbar {
 		if (this.board._focus_color) {
 			$(this.wrapper).find(".ev-focus-color-swatch").css("background", this.board._focus_color);
 		}
+	}
+
+	// ── Custom tooltip system ─────────────────────────────────────────────────
+	// Polished animated tooltips — replaces browser native title= tooltips.
+	// Elements: use data-ev-tip="..." attribute.
+
+	_init_tooltips() {
+		// Ensure shared tooltip DOM element exists (one per page, reused across toolbar instances)
+		if (!document.getElementById("ev-tooltip-singleton")) {
+			const el = document.createElement("div");
+			el.id = "ev-tooltip-singleton";
+			el.className = "ev-tooltip";
+			document.body.appendChild(el);
+		}
+
+		let _timer = null;
+		const $tip = $("#ev-tooltip-singleton");
+
+		const show = (target) => {
+			const txt = target.getAttribute("data-ev-tip");
+			if (!txt) return;
+			$tip.text(txt).css({ opacity: 0, display: "block" });
+			const rect = target.getBoundingClientRect();
+			const tw = $tip[0].offsetWidth;
+			const th = $tip[0].offsetHeight;
+			let left = rect.left + rect.width / 2 - tw / 2;
+			// Toolbar is at top — prefer below, fall back above if no room
+			let top = rect.bottom + 7;
+			if (top + th > window.innerHeight - 4) top = rect.top - th - 7;
+			left = Math.max(4, Math.min(left, window.innerWidth - tw - 4));
+			$tip.css({ left: left + "px", top: top + "px", opacity: 1 });
+		};
+
+		$(this.wrapper)
+			.on("mouseenter", "[data-ev-tip]", (e) => {
+				clearTimeout(_timer);
+				_timer = setTimeout(() => show(e.currentTarget), 280);
+			})
+			.on("mouseleave click", "[data-ev-tip]", () => {
+				clearTimeout(_timer);
+				$tip.css({ opacity: 0, display: "none" });
+			});
 	}
 
 	toggle(fmt_key) {
@@ -1604,11 +1582,36 @@ frappe.views.excel.ExcelToolbar = class ExcelToolbar {
 		const $sb = this.board.$right_sidebar;
 		if (!$sb) return;
 		const panel = $sb.data("panel");
-		$sb.removeClass("ev-right-sidebar--open");
+		$sb.removeClass("ev-right-sidebar--open ev-right-sidebar--wide");
 		$sb.data("panel", null);
 		if (panel) this.board.$wrapper.find(`[data-rs-panel="${panel}"]`).removeClass("ev-tb-btn--active");
 		// Clear content after CSS transition finishes
 		setTimeout(() => { if (!$sb.hasClass("ev-right-sidebar--open")) $sb.empty(); }, 250);
+	}
+
+	// ─── PERMISSIONS PANEL ────────────────────────────────────────────────────
+
+	_open_permission_panel() {
+		if (!frappe.user.has_role("System Manager")) return;
+		const $sb = this.board.$right_sidebar;
+		if (!$sb) return;
+
+		// Toggle: close if already open on permissions
+		if ($sb?.data("panel") === "permissions" && $sb.hasClass("ev-right-sidebar--open")) {
+			this._close_right_sidebar();
+			return;
+		}
+
+		// Add wide modifier so the HOT grid has room for all permission columns
+		$sb.addClass("ev-right-sidebar--wide");
+
+		const panel = new frappe.views.excel.PermissionPanel({
+			board:   this.board,
+			toolbar: this,
+		});
+		const $content = panel.build_panel_dom();
+		this._open_right_sidebar("permissions", $content);
+		panel.on_opened();
 	}
 
 	// ─── SMART LOOKUP ─────────────────────────────────────────────────────────

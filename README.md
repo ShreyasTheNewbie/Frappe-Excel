@@ -12,6 +12,7 @@ A full spreadsheet experience built into Frappe — edit, format, analyze, join,
 2. [Tech Stack](#tech-stack)
 3. [Installation](#installation)
 4. [Release Notes](#release-notes)
+   - [v3.4.3 — DocType Permission Panel + Security Hardening](#v343--doctype-permission-panel--security-hardening-apr-2026)
    - [v3.3 — Grid Intelligence + IntelliFlow SQL Engine](#v33--grid-intelligence--intelliflow-sql-engine-mar-2026)
    - [v3.2 — Smart Lookup + Activity Column](#v32--smart-lookup--activity-column-mar-2026)
    - [v3.1 — Format Persistence + Focus Cell](#v31--format-persistence--focus-cell-mar-2026)
@@ -204,6 +205,66 @@ bench --site your-site.com migrate  # only if DocTypes changed
 ---
 
 ## Release Notes
+
+---
+
+### v3.4.3 — DocType Permission Panel + Security Hardening (Apr 2026)
+
+**Access Management panel, `@excel_whitelist` decorator, autocomplete role picker, and tooltip fixes.**
+
+#### DocType Permission Panel (Data tab → lock icon)
+
+A full permission editor for any DocType, surfaced as a right sidebar inside Excel View — no separate page needed.
+
+- **Role Permissions grid** — Handsontable matrix of every (role, permlevel) row × 13 permission flags (Rd, Wr, Cr, Dl, Sb, Cn, Am, Rp, Ex, Im, Sh, Pr, Em); checkboxes save instantly via Frappe's canonical `permission_manager.update()` — cache-safe, upgrade-safe
+- **Animated status badge** — Live / Saving… / Error states with pulse animation; never misleads the user
+- **Green flash** — cells briefly flash green after a successful save
+- **Role search** — real-time filter with empty-state illustration
+- **User count** — each role shows `· N` inline (single aggregating SQL query, O(1) round-trips)
+- **Add Role autocomplete** — Awesomplete-powered input; shows only roles not already added; highlights match characters; opens above/below based on available viewport space; escapes `overflow:hidden` containers via `position:fixed` on `awesomplete-open`
+- **Remove Role** — `×` button appears on row hover; confirm dialog
+- **Field Levels tab** — searchable list of every data field with inline permlevel `<select>`; saves via `Property Setter` (upgrade-safe, no schema writes)
+- **Reset to Default** — reverts all Custom DocPerm rows; confirms before executing
+- **Blocked system DocTypes** — `DocType`, `DocField`, `DocPerm`, `Role`, `User`, `Session` etc. are blocked from modification
+- **System Manager only** — button hidden on client AND every server endpoint enforces the role; non-SM users get 403
+
+#### `@excel_whitelist()` Decorator
+
+Drop-in security-hardened replacement for `@frappe.whitelist()` — declarative, impossible to accidentally skip:
+
+```python
+@excel_whitelist(
+    roles=["System Manager"],
+    methods=["POST"],
+    doctype_perm=("doctype", "read"),
+    rate_limit={"calls": 120, "seconds": 60},
+    audit=True,
+)
+def update_role_permission(doctype, role, permlevel, ptype, value=None): ...
+```
+
+| Capability | `@frappe.whitelist()` | `@excel_whitelist()` |
+|---|---|---|
+| Frappe registration | ✓ | ✓ (delegates to it) |
+| Role-based access | manual throw | ✓ declarative |
+| HTTP method enforcement | ✗ | ✓ declarative |
+| DocType perm check | manual call | ✓ declarative |
+| Redis rate limiting | ✗ | ✓ atomic pipeline |
+| Audit trail | ✗ | ✓ structured log |
+| CSRF always enforced | xss_safe bypass | ✓ never bypassed |
+| Sensitive kwarg scrubbing | ✗ | ✓ in audit log |
+
+Internally wraps the security-checking function with `frappe.whitelist()` so all Frappe-internal registration (`whitelisted`, `allowed_http_methods_for_whitelisted_func`, `validate_argument_types`) is handled correctly across Frappe versions.
+
+#### Security Fixes
+
+- `_perm_guard(doctype)` now called on **all** permission endpoints — including the two read endpoints (`get_doctype_permissions`, `get_field_permlevels`) that previously allowed querying system DocType rows
+- Full coverage: all 7 endpoints guarded at both decorator (role) and function (blocked doctype) level
+
+#### Toolbar Tooltip Fix
+
+- Tooltip now positions **below** the button (not above into breadcrumbs) — correct for toolbar-at-top layout
+- Falls back to above if no viewport space below
 
 ---
 

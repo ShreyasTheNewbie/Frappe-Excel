@@ -60,8 +60,59 @@
 		padding: 0;
 	}
 
-	.list-paging-area .comparison-message {
-		display: none;
+	.list-paging-area {
+		display: none !important;
+	}
+
+}
+
+// ── Excel View scrollbars — Excel green thumb, both axes ──────────────────────
+
+.ev-page,
+.ev-grid-wrapper,
+.ev-hot-container,
+.wtHolder {
+	// Firefox
+	scrollbar-width: thin;
+	scrollbar-color: #217346 transparent;
+
+	// Webkit (Chrome, Safari, Edge)
+	&::-webkit-scrollbar {
+		width: 8px;
+		height: 8px;
+	}
+
+	&::-webkit-scrollbar-track {
+		background: transparent;
+	}
+
+	&::-webkit-scrollbar-thumb {
+		background: #217346;
+		border-radius: 4px;
+		border: 2px solid transparent;
+		background-clip: content-box;
+
+		&:hover { background: #1a5c38; background-clip: content-box; }
+	}
+
+	&::-webkit-scrollbar-corner {
+		background: transparent;
+	}
+}
+
+[data-theme="dark"] {
+	.ev-page,
+	.ev-grid-wrapper,
+	.ev-hot-container,
+	.wtHolder {
+		scrollbar-color: #4ec994 transparent;
+
+		&::-webkit-scrollbar-thumb {
+			background: #4ec994;
+			background-clip: content-box;
+
+			&:hover { background: #3ab07d; background-clip: content-box; }
+		}
 	}
 }
 
@@ -1959,6 +2010,21 @@
 
 .ev-page-active {
 	z-index: 200 !important;
+
+	// Disable the Toggle Sidebar button — sidebar is hidden in Excel View.
+	.list-sidebar-button {
+		pointer-events: none !important;
+		opacity: 0.3 !important;
+	}
+}
+
+// .page-form is inside .ev-page (page.main), NOT inside .ev-page-active (page-head).
+// They are siblings at the page level, so hide filter+sort bar from .ev-page context.
+.ev-page {
+	// Hide entire Frappe filter+sort bar (ID/date inputs, Filter/Sort row).
+	.page-form {
+		display: none !important;
+	}
 }
 
 // ── Formula help popup ────────────────────────────────────────────────────────
@@ -2921,7 +2987,7 @@
 
 .ev-page .handsontable .ht_master .wtHolder {
 	scrollbar-width: thin;
-	scrollbar-color: #b0b0b0 var(--ev-header-bg);
+	scrollbar-color: #217346 var(--ev-header-bg);
 
 	&::-webkit-scrollbar {
 		height: 9px;
@@ -2933,29 +2999,29 @@
 	}
 
 	&::-webkit-scrollbar-thumb {
-		background: #b0b0b0;
+		background: #217346;
 		border-radius: 3px;
 		border: 1px solid var(--ev-header-bg);
 
 		&:hover {
-			background: #808080;
+			background: #1a5c38;
 		}
 	}
 }
 
 [data-theme="dark"] .ev-page .handsontable .ht_master .wtHolder {
-	scrollbar-color: #555 #2d2d2d;
+	scrollbar-color: #4ec994 #2d2d2d;
 
 	&::-webkit-scrollbar-track {
 		background: #2d2d2d;
 	}
 
 	&::-webkit-scrollbar-thumb {
-		background: #555;
+		background: #4ec994;
 		border-color: #2d2d2d;
 
 		&:hover {
-			background: #777;
+			background: #3ab07d;
 		}
 	}
 }
@@ -6152,100 +6218,93 @@
 // Design reference: Excel Mac — green header bar, clean ribbon, CSS-variable
 // aware so both light + dark Frappe themes work correctly.
 
-$ev-excel-green: #217346;
-$ev-excel-green-dark: #185c37;
-$ev-excel-green-hover: rgba(255, 255, 255, 0.15);
+$ev-green:      #217346;
+$ev-green-dk:   #4ec994; // lighter green for dark theme
 
-// CSS custom properties for ribbon surfaces
+// ── CSS custom properties — Excel-inspired color system ───────────────────────
 :root {
-	--ev-ribbon-tabs-bg:        rgba(232, 232, 232, 0.82);
-	--ev-ribbon-tabs-bdr:       rgba(0, 0, 0, 0.12);
-	--ev-ribbon-content-bg:     rgba(244, 244, 244, 0.88);
-	--ev-ribbon-content-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.80);
-	--ev-ribbon-sep:            rgba(0, 0, 0, 0.10);
-	--ev-tab-active-bg:         #ffffff;
-	--ev-ribbon-blur:           blur(14px) saturate(1.5);
+	// Surfaces
+	--ev-toolbar-bg:        #ffffff;
+	--ev-toolbar-bdr:       #e1dfdd;
+	--ev-toolbar-sep:       #d8d8d8;
+
+	// Tabs
+	--ev-tab-color:         #605e5c;
+	--ev-tab-active-color:  #217346;
+
+	// Buttons
+	--ev-btn-color:         #323130;
+	--ev-btn-hover-bg:      #f0efee;
+	--ev-btn-active-bg:     rgba(33, 115, 70, 0.10);
+	--ev-btn-active-color:  #217346;
+	--ev-btn-active-bdr:    #217346;
+
+	// Right-side action buttons — subtle pill look
+	--ev-action-bg:         #f3f2f1;
+	--ev-action-bdr:        #e1dfdd;
+	--ev-action-hover-bg:   #e8e6e4;
+
+	// Selects
+	--ev-select-bg:         #ffffff;
+	--ev-select-bdr:        #c8c6c4;
 }
 
-// Dark mode — Frappe v14+ uses data-theme="dark" on <html>
 [data-theme="dark"] {
-	--ev-ribbon-tabs-bg:        rgba(30, 32, 34, 0.88);
-	--ev-ribbon-tabs-bdr:       rgba(255, 255, 255, 0.08);
-	--ev-ribbon-content-bg:     rgba(36, 38, 40, 0.92);
-	--ev-ribbon-content-shadow: none;
-	--ev-ribbon-sep:            rgba(255, 255, 255, 0.08);
-	--ev-tab-active-bg:         rgba(255, 255, 255, 0.08);
-	--ev-ribbon-blur:           blur(14px) saturate(1.2);
+	--ev-toolbar-bg:        #1e2022;
+	--ev-toolbar-bdr:       #333537;
+	--ev-toolbar-sep:       #3a3c3e;
+
+	--ev-tab-color:         #9d9b99;
+	--ev-tab-active-color:  #4ec994;
+
+	--ev-btn-color:         #d4d2d0;
+	--ev-btn-hover-bg:      rgba(255, 255, 255, 0.07);
+	--ev-btn-active-bg:     rgba(78, 201, 148, 0.15);
+	--ev-btn-active-color:  #4ec994;
+	--ev-btn-active-bdr:    #4ec994;
+
+	--ev-action-bg:         rgba(255, 255, 255, 0.05);
+	--ev-action-bdr:        rgba(255, 255, 255, 0.10);
+	--ev-action-hover-bg:   rgba(255, 255, 255, 0.10);
+
+	--ev-select-bg:         #2a2c2e;
+	--ev-select-bdr:        #484a4c;
 }
 
-// ── Quick Access Bar ─────────────────────────────────────────────────────────
-// Matches the signature Excel green header from Screenshot 3.
-.ev-quick-access {
-	height: 34px;
+// ── Single compact toolbar bar ────────────────────────────────────────────────
+// 38px vs old 144px ribbon — saves 106px of grid space
+.ev-toolbar {
+	height: 38px;
 	display: flex;
 	align-items: center;
-	gap: 2px;
-	padding: 0 8px;
+	padding: 0 6px;
+	gap: 1px;
+	background: var(--ev-toolbar-bg);
+	border-bottom: 1px solid var(--ev-toolbar-bdr);
+	overflow-x: auto;
+	overflow-y: visible;
+	scrollbar-width: none;
 	flex-shrink: 0;
-	background: $ev-excel-green; // Excel's iconic green — same in light & dark
+	// Note: overflow-y:visible is overridden by overflow-x:auto per CSS spec,
+	// so dropdowns use position:fixed via JS to escape the clip.
+
+	&::-webkit-scrollbar { display: none; }
 }
 
-.ev-qa-sep {
-	width: 1px;
-	height: 18px;
-	background: rgba(255, 255, 255, 0.3);
-	margin: 0 6px;
-	flex-shrink: 0;
-}
-
-// Quick Access buttons — white text/icons on green background, always horizontal
-.ev-qa-btn {
-	display: inline-flex;
-	flex-direction: row; // override ev-tb-btn's column default
-	align-items: center;
-	gap: 5px;
-	height: 28px;
-	padding: 0 9px;
-	font-size: 12px;
-	font-weight: 500;
-	border: 1px solid transparent;
-	border-radius: 3px;
-	background: transparent;
-	color: #fff;
-	cursor: pointer;
-	white-space: nowrap;
-	-webkit-user-select: none;
-	user-select: none;
-
-	&:hover {
-		background: $ev-excel-green-hover;
-		border-color: rgba(255, 255, 255, 0.25);
-	}
-
-	svg {
-		flex-shrink: 0;
-		opacity: 0.9;
-		fill: #fff;
-		stroke: #fff;
-	}
-}
-
-// ── Tab strip (Home / Insert / Formulas / Data / View) ────────────────────────
+// ── Tab pills ─────────────────────────────────────────────────────────────────
 .ev-ribbon-tabs {
-	height: 30px;
 	display: flex;
-	background: var(--ev-ribbon-tabs-bg);
-	-webkit-backdrop-filter: var(--ev-ribbon-blur);
-	backdrop-filter: var(--ev-ribbon-blur);
-	border-bottom: 1px solid var(--ev-ribbon-tabs-bdr);
+	align-items: stretch;
+	height: 100%;
 	flex-shrink: 0;
 }
 
 .ev-ribbon-tab {
-	padding: 0 16px;
-	font-size: 12.5px;
+	padding: 0 11px;
+	font-size: 12px;
+	font-weight: 500;
 	cursor: pointer;
-	color: var(--text-muted);
+	color: var(--ev-tab-color);
 	display: flex;
 	align-items: center;
 	border: none;
@@ -6254,162 +6313,180 @@ $ev-excel-green-hover: rgba(255, 255, 255, 0.15);
 	position: relative;
 	-webkit-user-select: none;
 	user-select: none;
+	outline: none;
+	transition: color 0.1s, background 0.1s;
 
 	&:hover {
-		color: var(--text-color);
-		background: rgba(0, 0, 0, 0.06);
+		color: var(--ev-btn-color);
+		background: var(--ev-btn-hover-bg);
 	}
 
 	&--active {
 		font-weight: 600;
-		color: $ev-excel-green;
-		background: var(--ev-tab-active-bg); // lifts to white in light / subtle in dark
+		color: var(--ev-tab-active-color);
 
 		&::after {
 			content: "";
 			position: absolute;
 			bottom: 0;
-			left: 0;
-			right: 0;
+			left: 5px;
+			right: 5px;
 			height: 2px;
-			background: $ev-excel-green;
+			background: var(--ev-tab-active-color);
+			border-radius: 2px 2px 0 0;
 		}
 	}
 }
 
-// ── Content row ───────────────────────────────────────────────────────────────
-// 80px gives labels room: 4px top + ~54px btn + 2px gap + ~14px label + 6px bot = 80px
-.ev-ribbon-content {
-	height: 80px;
-	display: flex;
-	align-items: stretch;
-	overflow-x: auto;
-	scrollbar-width: none;
-	/* Firefox */
-	border-bottom: 1px solid var(--ev-ribbon-sep);
+// ── Vertical group separator ──────────────────────────────────────────────────
+.ev-tb-sep {
+	width: 1px;
+	height: 18px;
+	background: var(--ev-toolbar-sep);
+	margin: 0 4px;
 	flex-shrink: 0;
-	background: var(--ev-ribbon-content-bg);
-	-webkit-backdrop-filter: var(--ev-ribbon-blur);
-	backdrop-filter: var(--ev-ribbon-blur);
-	box-shadow: var(--ev-ribbon-content-shadow);
-
-	&::-webkit-scrollbar {
-		display: none;
-	}
 }
 
+// ── Tab pane: hidden → inline flex row when active ────────────────────────────
 .ev-tab-pane {
 	display: none;
 
 	&--active {
-		display: contents;
+		display: flex;
+		align-items: center;
+		gap: 1px;
 	}
 }
 
-// ── Ribbon groups ─────────────────────────────────────────────────────────────
-.ev-ribbon-group {
-	display: flex;
-	flex-direction: column;
-	align-items: stretch;
-	padding: 4px 6px 3px;
-	border-right: 1px solid var(--ev-ribbon-sep);
-	flex-shrink: 0;
+// ── Spacer + right section ────────────────────────────────────────────────────
+.ev-tb-spacer { flex: 1; min-width: 8px; }
 
-	&:last-child {
-		border-right: none;
-	}
-}
-
-.ev-ribbon-group-btns {
+.ev-tb-right {
 	display: flex;
-	flex-flow: row wrap;
-	align-items: stretch; // buttons stretch to fill height
+	align-items: center;
 	gap: 2px;
-	flex: 1;
-	align-content: center;
-	min-height: 0;
+	flex-shrink: 0;
 }
 
-.ev-ribbon-group-name {
-	font-size: 10px;
-	color: var(--text-muted);
-	text-align: center;
-	padding-top: 2px;
-	line-height: 1.25;
-	display: -webkit-box;
-	-webkit-line-clamp: 2;
-	-webkit-box-orient: vertical;
-	overflow: hidden;
-}
-
-// ── Large icon+text buttons ───────────────────────────────────────────────────
-.ev-tb-btn--lg {
+// ── Base button ───────────────────────────────────────────────────────────────
+.ev-tb-btn {
 	display: inline-flex;
-	flex-direction: column;
 	align-items: center;
 	justify-content: center;
-	gap: 2px;
-	min-width: 42px;
-	height: auto; // stretch to fill ev-ribbon-group-btns
-	align-self: stretch;
-	min-height: 44px;
-	padding: 4px 8px;
+	height: 26px;
+	min-width: 26px;
+	padding: 0 4px;
 	border: 1px solid transparent;
 	border-radius: 3px;
 	background: transparent;
-	color: var(--text-color);
+	color: var(--ev-btn-color);
+	font-size: 12.5px;
+	font-weight: 400;
 	cursor: pointer;
+	white-space: nowrap;
 	-webkit-user-select: none;
 	user-select: none;
+	gap: 2px;
+	flex-shrink: 0;
+	line-height: 1;
+	outline: none;
+	transition: background 0.08s;
+
+	svg { flex-shrink: 0; }
 
 	&:hover {
-		background: rgba(0, 0, 0, 0.06);
-		border-color: var(--border-color);
+		background: var(--ev-btn-hover-bg);
+		// No border change on hover — just subtle background shift
 	}
+
+	&:focus { outline: none; }
 
 	&.ev-active {
-		background: rgba(33, 115, 70, 0.12);
-		border-color: $ev-excel-green;
-		color: $ev-excel-green;
+		background: var(--ev-btn-active-bg);
+		border-color: var(--ev-btn-active-bdr);
+		color: var(--ev-btn-active-color);
 	}
+}
 
-	.ev-btn-icon {
-		flex-shrink: 0;
-		display: block;
-	}
+// ── Period button — compact pill showing current period ───────────────────────
+.ev-tb-right-btn {
+	padding: 0 8px;
+	gap: 3px;
+	font-size: 11px;
+	font-weight: 500;
+	background: var(--ev-action-bg);
+	border-color: var(--ev-action-bdr);
+	border-radius: 4px;
+	flex-direction: row; // icon + label + chevron in a row
 
-	.ev-btn-label {
-		font-size: 10.5px;
-		line-height: 1.2;
-		text-align: center;
+	&:hover { background: var(--ev-action-hover-bg); }
+
+	.ev-period-label {
+		font-size: 11px;
 		max-width: 68px;
-		white-space: nowrap;
 		overflow: hidden;
 		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 }
 
-// ── AutoSum sigma ─────────────────────────────────────────────────────────────
-.ev-fn-sigma {
-	font-size: 22px;
-	font-weight: 700;
-	line-height: 1;
-	display: block;
-	color: $ev-excel-green;
+// ── Save button — green accent ─────────────────────────────────────────────────
+.ev-tb-save-btn {
+	background: rgba(33, 115, 70, 0.1);
+	border-color: rgba(33, 115, 70, 0.3);
+	color: #217346;
+	border-radius: 4px;
+
+	&:hover {
+		background: rgba(33, 115, 70, 0.18);
+		border-color: rgba(33, 115, 70, 0.5);
+	}
+
+	svg { color: #217346; }
 }
 
-// ── Two-row layouts: Font / Alignment / Number groups ─────────────────────────
-.ev-font-row,
-.ev-font-row2,
-.ev-align-row,
-.ev-align-row2,
-.ev-num-row,
-.ev-num-row2 {
-	display: flex;
-	flex: 1 1 100%; // full width → stacks vertically within group
-	align-items: center;
-	gap: 2px;
+[data-theme="dark"] .ev-tb-save-btn {
+	background: rgba(78, 201, 148, 0.12);
+	border-color: rgba(78, 201, 148, 0.3);
+	color: #4ec994;
+
+	&:hover {
+		background: rgba(78, 201, 148, 0.2);
+	}
+
+	svg { color: #4ec994; }
 }
+
+// ── Font family / size / numfmt selects ───────────────────────────────────────
+.ev-tb-select {
+	height: 26px;
+	border: 1px solid var(--ev-select-bdr);
+	border-radius: 3px;
+	background: var(--ev-select-bg);
+	color: var(--ev-btn-color);
+	font-size: 11.5px;
+	padding: 0 4px;
+	cursor: pointer;
+	outline: none;
+	flex-shrink: 0;
+	transition: border-color 0.1s;
+
+	&.ev-tb-font-family { width: 108px; }
+	&.ev-tb-font-size   { width: 44px; }
+	&.ev-numfmt-select  { width: 86px; }
+
+	&:focus { border-color: $ev-green; }
+}
+
+// ── AutoSum Σ ─────────────────────────────────────────────────────────────────
+.ev-fn-sigma {
+	font-size: 14px;
+	font-weight: 700;
+	line-height: 1;
+	color: $ev-green;
+}
+
+[data-theme="dark"] .ev-fn-sigma { color: $ev-green-dk; }
 
 // ── Number format select ──────────────────────────────────────────────────────
 .ev-numfmt-select {
@@ -14300,3 +14377,565 @@ $fc-card-colors: (
 	.ev-qfp-add-btn:hover { border-color: #2d9e5f; color: #2d9e5f; background: rgba(45,158,95,0.08); }
 	.ev-qfp-input:focus { border-color: #2d9e5f; box-shadow: 0 0 0 2px rgba(45,158,95,0.18); }
 }
+
+// ── Excel View custom tooltip ─────────────────────────────────────────────────
+// Shared singleton #ev-tooltip-singleton — positioned via JS, no DOM nesting issues.
+
+.ev-tooltip {
+	position: fixed;
+	z-index: 99999;
+	pointer-events: none;
+	background: rgba(24, 24, 27, 0.93);
+	color: #f4f4f5;
+	font-size: 11.5px;
+	line-height: 1.4;
+	padding: 4px 9px;
+	border-radius: 5px;
+	max-width: 260px;
+	white-space: nowrap;
+	box-shadow: 0 2px 10px rgba(0, 0, 0, 0.28);
+	transition: opacity 0.1s ease;
+	font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+	letter-spacing: 0.01em;
+}
+
+[data-theme="dark"] .ev-tooltip {
+	background: rgba(50, 52, 58, 0.97);
+	box-shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
+}
+
+// ── Right Sidebar — wide modifier ─────────────────────────────────────────────
+// Permissions panel needs ~640px for the HOT grid (15 columns).
+
+.ev-right-sidebar.ev-right-sidebar--wide.ev-right-sidebar--open { width: 640px; }
+.ev-rs-panel.ev-perm-panel { width: 640px; }
+
+// ── Permission Panel v2 ───────────────────────────────────────────────────────
+
+.ev-perm-panel {
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	overflow: hidden;
+	background: var(--bg-color);
+	font-size: 13px;
+	font-family: var(--ev-font, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif);
+
+	// ── Header ───────────────────────────────────────────────────────────────
+	.ev-perm-hdr {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		padding: 12px 14px 11px;
+		background: linear-gradient(135deg, #1a5c38 0%, #217346 60%, #2d9e5f 100%);
+		flex-shrink: 0;
+		position: relative;
+	}
+
+	.ev-perm-hdr-icon {
+		width: 30px;
+		height: 30px;
+		border-radius: 8px;
+		background: rgba(255, 255, 255, 0.15);
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		color: #fff;
+		flex-shrink: 0;
+	}
+
+	.ev-perm-hdr-text {
+		flex: 1;
+		min-width: 0;
+	}
+
+	.ev-perm-hdr-title {
+		font-size: 13px;
+		font-weight: 600;
+		color: #fff;
+		line-height: 1.3;
+	}
+
+	.ev-perm-hdr-sub {
+		font-size: 11px;
+		color: rgba(255, 255, 255, 0.72);
+		margin-top: 1px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.ev-rs-close {
+		width: 26px;
+		height: 26px;
+		border: none;
+		background: rgba(255, 255, 255, 0.12);
+		color: rgba(255, 255, 255, 0.8);
+		border-radius: 5px;
+		cursor: pointer;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		flex-shrink: 0;
+		transition: background 0.15s, color 0.15s;
+
+		&:hover { background: rgba(255, 255, 255, 0.22); color: #fff; }
+	}
+
+	// ── Status badge ──────────────────────────────────────────────────────────
+	.ev-perm-badge {
+		display: flex;
+		align-items: center;
+		gap: 4px;
+		padding: 3px 8px;
+		border-radius: 20px;
+		font-size: 10.5px;
+		font-weight: 600;
+		flex-shrink: 0;
+		background: rgba(255, 255, 255, 0.14);
+		color: rgba(255, 255, 255, 0.9);
+		letter-spacing: 0.02em;
+	}
+
+	.ev-perm-badge-dot {
+		width: 6px;
+		height: 6px;
+		border-radius: 50%;
+		background: currentColor;
+		flex-shrink: 0;
+	}
+
+	.ev-perm-badge[data-state="live"] {
+		background: rgba(78, 201, 148, 0.25);
+		color: #c8f5e2;
+		.ev-perm-badge-dot { background: #4ec994; }
+	}
+
+	.ev-perm-badge[data-state="saving"] {
+		background: rgba(251, 191, 36, 0.2);
+		color: #fde68a;
+		.ev-perm-badge-dot {
+			background: #fbbf24;
+			animation: ev-badge-pulse 0.75s ease-in-out infinite;
+		}
+	}
+
+	.ev-perm-badge[data-state="error"] {
+		background: rgba(248, 113, 113, 0.2);
+		color: #fecaca;
+		.ev-perm-badge-dot { background: #f87171; }
+	}
+
+	// ── Tabs ─────────────────────────────────────────────────────────────────
+	.ev-perm-tabs {
+		display: flex;
+		background: var(--fg-color);
+		border-bottom: 1px solid var(--border-color);
+		flex-shrink: 0;
+	}
+
+	.ev-perm-tab {
+		padding: 8px 16px;
+		font-size: 12px;
+		font-weight: 500;
+		color: var(--text-muted);
+		border-bottom: 2px solid transparent;
+		cursor: pointer;
+		transition: color 0.15s, border-color 0.15s;
+		white-space: nowrap;
+		margin-bottom: -1px;
+
+		&:hover { color: var(--text-color); }
+		&.ev-perm-tab--active { color: #217346; border-bottom-color: #217346; }
+	}
+
+	// ── Tab panes ────────────────────────────────────────────────────────────
+	.ev-perm-pane {
+		display: none;
+		flex: 1;
+		flex-direction: column;
+		overflow: hidden;
+		&.ev-perm-pane--active { display: flex; }
+	}
+
+	// ── Search bar (roles tab) ────────────────────────────────────────────────
+	.ev-perm-search-bar {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		padding: 7px 10px;
+		border-bottom: 1px solid var(--border-color);
+		background: var(--fg-color);
+		flex-shrink: 0;
+	}
+
+	.ev-perm-search-icon { color: var(--text-muted); flex-shrink: 0; }
+
+	.ev-perm-role-search {
+		flex: 1;
+		border: none;
+		background: transparent;
+		font-size: 12px;
+		color: var(--text-color);
+		outline: none;
+		&::placeholder { color: var(--text-muted); }
+	}
+
+	.ev-perm-search-clear {
+		border: none;
+		background: none;
+		color: var(--text-muted);
+		cursor: pointer;
+		font-size: 14px;
+		line-height: 1;
+		padding: 0 2px;
+		&:hover { color: var(--text-color); }
+	}
+
+	// ── HOT wrap ──────────────────────────────────────────────────────────────
+	.ev-perm-hot-wrap {
+		flex: 1;
+		overflow: hidden;
+		position: relative;
+
+		// ── Column group headers — thin top-border stripe only, no bg override ──
+		// HOT handles header background natively; we only add colored stripe + text.
+		th.ev-phdr-read,
+		th.ev-phdr-danger,
+		th.ev-phdr-advanced {
+			font-size: 10px !important;
+			font-weight: 700 !important;
+			border-top: 3px solid transparent !important;
+		}
+
+		th.ev-phdr-read     { border-top-color: #217346 !important; color: #217346 !important; }
+		th.ev-phdr-danger   { border-top-color: #dc2626 !important; color: #b91c1c !important; }
+		th.ev-phdr-advanced { border-top-color: #3b82f6 !important; color: #1e40af !important; }
+
+		// Green flash on successful save
+		td.ev-perm-cell-saved {
+			background: rgba(33, 115, 70, 0.15) !important;
+			transition: background 0.6s ease-out;
+		}
+	}
+
+	// ── Role cell (name + user count + delete btn) ────────────────────────────
+	.ev-prc-wrap {
+		display: flex;
+		align-items: center;
+		gap: 4px;
+		height: 100%;
+		padding: 0 4px;
+		overflow: hidden;
+	}
+
+	.ev-prc-name {
+		font-size: 12px;
+		font-weight: 500;
+		color: var(--text-color);
+		flex: 1;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.ev-prc-meta {
+		font-size: 11px;
+		color: var(--text-muted);
+		white-space: nowrap;
+		flex-shrink: 0;
+	}
+
+	.ev-prc-del {
+		width: 18px;
+		height: 18px;
+		border: 1px solid transparent;
+		border-radius: 4px;
+		background: transparent;
+		color: transparent;
+		font-size: 13px;
+		line-height: 1;
+		cursor: pointer;
+		flex-shrink: 0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		transition: background 0.12s, color 0.12s, border-color 0.12s;
+	}
+
+	// Only show × on row hover — the wrapping TD gets .htHover from HOT
+	.htHover .ev-prc-del,
+	.ev-prc-wrap:hover .ev-prc-del {
+		color: #c62828;
+		border-color: rgba(198, 40, 40, 0.25);
+		background: rgba(198, 40, 40, 0.07);
+	}
+
+	// ── Empty state ───────────────────────────────────────────────────────────
+	.ev-perm-empty-state {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: 10px;
+		color: var(--text-muted);
+		padding: 24px;
+
+		svg { opacity: 0.35; }
+
+		p {
+			font-size: 12.5px;
+			margin: 0;
+			text-align: center;
+		}
+	}
+
+	// ── Add role row ──────────────────────────────────────────────────────────
+	.ev-perm-add-row {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		padding: 7px 10px;
+		border-top: 1px solid var(--border-color);
+		background: var(--fg-color);
+		flex-shrink: 0;
+
+		select, input[type="text"] {
+			height: 28px;
+			border: 1px solid var(--border-color);
+			border-radius: 4px;
+			background: var(--bg-color);
+			color: var(--text-color);
+			font-size: 12px;
+			padding: 0 8px;
+			outline: none;
+			&:focus { border-color: #217346; box-shadow: 0 0 0 2px rgba(33,115,70,0.12); }
+			&::placeholder { color: var(--text-muted); }
+		}
+
+		// Autocomplete wrapper — flex-1, positions the awesomplete dropdown
+		.ev-perm-role-ac-wrap {
+			flex: 1;
+			min-width: 0;
+			position: relative;
+
+			input { width: 100%; box-sizing: border-box; }
+
+			// Awesomplete dropdown inside the panel
+			.awesomplete > ul {
+				z-index: 9999;
+				font-size: 12px;
+				min-width: 180px;
+				max-height: 200px;
+				overflow-y: auto;
+				border: 1px solid var(--border-color);
+				border-radius: 4px;
+				background: var(--bg-color);
+				box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+				margin-top: 2px;
+
+				li { padding: 5px 10px; }
+				li:hover, li[aria-selected="true"] {
+					background: rgba(33,115,70,0.1);
+					color: var(--text-color);
+				}
+				mark { background: none; color: #217346; font-weight: 600; }
+			}
+		}
+
+		.ev-perm-lvl-sel { width: 54px; flex-shrink: 0; }
+
+		.ev-perm-add-btn {
+			height: 28px;
+			padding: 0 12px;
+			border: 1px solid #217346;
+			background: rgba(33, 115, 70, 0.08);
+			color: #217346;
+			border-radius: 4px;
+			font-size: 12px;
+			font-weight: 500;
+			cursor: pointer;
+			white-space: nowrap;
+			flex-shrink: 0;
+			transition: background 0.15s;
+			&:hover { background: rgba(33, 115, 70, 0.15); }
+		}
+	}
+
+	// ── Field search + list ───────────────────────────────────────────────────
+	.ev-perm-field-search-wrap {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		padding: 7px 10px;
+		border-bottom: 1px solid var(--border-color);
+		background: var(--fg-color);
+		flex-shrink: 0;
+	}
+
+	.ev-perm-field-search {
+		flex: 1;
+		border: none;
+		background: transparent;
+		font-size: 12px;
+		color: var(--text-color);
+		outline: none;
+		&::placeholder { color: var(--text-muted); }
+	}
+
+	.ev-perm-field-list {
+		flex: 1;
+		overflow-y: auto;
+		margin: 0;
+		padding: 0;
+	}
+
+	.ev-perm-field-row {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 6px 12px;
+		border-bottom: 1px solid var(--border-color);
+		transition: background 0.1s;
+		&:hover { background: var(--fg-color); }
+	}
+
+	.ev-pfl-label {
+		flex: 1;
+		font-size: 12px;
+		color: var(--text-color);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	.ev-pfl-type {
+		font-size: 10px;
+		color: var(--text-muted);
+		font-family: var(--monospace-font, monospace);
+		flex-shrink: 0;
+		max-width: 88px;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+	}
+
+	select.ev-pfl-lvl {
+		width: 50px;
+		height: 26px;
+		border: 1px solid var(--border-color);
+		border-radius: 4px;
+		background: var(--bg-color);
+		color: var(--text-color);
+		font-size: 12px;
+		padding: 0 4px;
+		flex-shrink: 0;
+		cursor: pointer;
+		outline: none;
+		transition: border-color 0.2s;
+		&:focus { border-color: #217346; }
+
+		&.ev-pfl-saved {
+			border-color: #217346;
+			box-shadow: 0 0 0 2px rgba(33, 115, 70, 0.15);
+		}
+	}
+
+	// ── Footer ────────────────────────────────────────────────────────────────
+	.ev-perm-footer {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 8px 12px;
+		border-top: 1px solid var(--border-color);
+		background: var(--fg-color);
+		flex-shrink: 0;
+	}
+
+	.ev-perm-status {
+		flex: 1;
+		font-size: 11px;
+		color: var(--text-muted);
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		text-align: center;
+	}
+
+	.ev-perm-footer-btn {
+		height: 27px;
+		padding: 0 11px;
+		border: 1px solid var(--border-color);
+		background: var(--bg-color);
+		color: var(--text-muted);
+		border-radius: 4px;
+		font-size: 11.5px;
+		cursor: pointer;
+		transition: background 0.15s, color 0.15s;
+		flex-shrink: 0;
+		&:hover { background: var(--fg-color); color: var(--text-color); }
+
+		&.ev-perm-footer-btn--danger {
+			border-color: rgba(198, 40, 40, 0.35);
+			color: #c62828;
+			background: rgba(198, 40, 40, 0.04);
+			&:hover { background: rgba(198, 40, 40, 0.09); }
+		}
+	}
+}
+
+// ── Permission Panel — animations ─────────────────────────────────────────────
+
+@keyframes ev-badge-pulse {
+	0%, 100% { opacity: 1; }
+	50%       { opacity: 0.35; }
+}
+
+// ── Permission Panel — dark theme overrides ───────────────────────────────────
+
+[data-theme="dark"] .ev-perm-panel {
+	.ev-perm-hdr { background: linear-gradient(135deg, #0f3320 0%, #1a5c38 60%, #217346 100%); }
+
+	.ev-perm-tab.ev-perm-tab--active { color: #4ec994; border-bottom-color: #4ec994; }
+
+	.ev-perm-add-row {
+		.ev-perm-add-btn {
+			border-color: #4ec994;
+			color: #4ec994;
+			background: rgba(78, 201, 148, 0.08);
+			&:hover { background: rgba(78, 201, 148, 0.14); }
+		}
+		select:focus, input[type="text"]:focus { border-color: #4ec994; box-shadow: 0 0 0 2px rgba(78,201,148,0.12); }
+
+		.ev-perm-role-ac-wrap .awesomplete > ul {
+			background: #1e1e1e;
+			border-color: #3a3a3a;
+			li:hover, li[aria-selected="true"] { background: rgba(78,201,148,0.12); }
+			mark { color: #4ec994; }
+		}
+	}
+
+	select.ev-pfl-lvl:focus { border-color: #4ec994; }
+	select.ev-pfl-lvl.ev-pfl-saved { border-color: #4ec994; box-shadow: 0 0 0 2px rgba(78,201,148,0.15); }
+
+	.ev-perm-footer-btn.ev-perm-footer-btn--danger {
+		border-color: rgba(248, 113, 113, 0.3);
+		color: #f87171;
+		background: rgba(248, 113, 113, 0.06);
+		&:hover { background: rgba(248, 113, 113, 0.12); }
+	}
+
+	.ev-perm-hot-wrap {
+		th.ev-phdr-read     { border-top-color: #4ec994 !important; color: #4ec994 !important; }
+		th.ev-phdr-danger   { border-top-color: #f87171 !important; color: #f87171 !important; }
+		th.ev-phdr-advanced { border-top-color: #60a5fa !important; color: #60a5fa !important; }
+
+		td.ev-perm-cell-saved  { background: rgba(78, 201, 148, 0.18) !important; }
+	}
+
+	.ev-prc-del {
+		&:hover, .htHover & { color: #f87171; border-color: rgba(248,113,113,0.25); background: rgba(248,113,113,0.1); }
+	}
+}
+
