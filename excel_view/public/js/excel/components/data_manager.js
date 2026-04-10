@@ -4,7 +4,7 @@
  * Handles all Frappe DB interactions:
  *  - Convert list data → 2D matrix for HOT
  *  - Determine cell read-only state from permissions + field config
- *  - Debounced save of edited cells → frappe.db.set_value
+ *  - Debounced save of edited cells → full ORM doc.save() via bulk_set_value
  *  - Row deletion
  */
 
@@ -119,9 +119,8 @@ frappe.views.excel.DataManager = class DataManager {
 		this._save_queue = {};
 
 		const doctype = this.board.doctype;
-		// Single HTTP round-trip: server iterates sequentially in one transaction.
-		// Prevents MySQL deadlocks that occur when parallel set_value calls lock
-		// the same child tables or related rows concurrently.
+		// Single HTTP round-trip: server calls doc.save() for each record,
+		// running all controllers and hooks in one transaction.
 		const updates = Object.entries(queue).map(([name, fields]) => ({ name, fields }));
 
 		try {

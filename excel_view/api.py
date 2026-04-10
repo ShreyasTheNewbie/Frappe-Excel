@@ -277,19 +277,23 @@ def frappe_get(doctype: str, name: str, fieldname: str) -> dict:
 @frappe.whitelist()
 def bulk_set_value(doctype: str, updates: str) -> dict:
     """
-    Update multiple existing records of the same DocType in one server round-trip.
+    Update multiple existing records via the full Frappe ORM (doc.save()).
+
+    Every write goes through validate, before_save, after_save, on_change and
+    all controller methods — identical to saving from the Frappe form UI.
+    doc.save() calls notify_update() internally, so realtime list_update events
+    are queued automatically and fired on the final commit.
+
+    Submitted documents are rejected with a clear error; use the amend workflow.
 
     updates: JSON array of {name: str, fields: {fieldname: value, ...}}
-
-    All writes run sequentially in a single transaction — no concurrent locks,
-    no MySQL deadlocks. A single frappe.db.commit() at the end commits everything.
     Returns {"errors": [{"name": ..., "error": ...}, ...]} — empty list = all OK.
     """
     frappe.has_permission(doctype, "write", throw=True)
 
     updates_data: list[dict] = frappe.parse_json(updates)
     errors: list[dict] = []
-    saved_names: list[str] = []
+    any_saved = False
 
     for item in updates_data:
         name   = item.get("name")
@@ -297,20 +301,23 @@ def bulk_set_value(doctype: str, updates: str) -> dict:
         if not name or not fields:
             continue
         try:
-            frappe.db.set_value(doctype, name, fields)
-            saved_names.append(name)
+            doc = frappe.get_doc(doctype, name)
+            if doc.docstatus == 1:
+                frappe.throw(
+                    _("{0} is submitted — edit is not allowed. Please amend the document first.").format(
+                        frappe.bold(name)
+                    )
+                )
+            for fieldname, value in fields.items():
+                doc.set(fieldname, value)
+            doc.save()
+            any_saved = True
         except Exception as exc:
             errors.append({"name": name, "error": str(exc)})
 
-    if saved_names:
-        # Queue list_update events before commit so flush_realtime_log fires
-        # with the commit below — same pattern as Document.notify_update().
-        for name in saved_names:
-            frappe.publish_realtime(
-                "list_update",
-                {"doctype": doctype, "name": name, "user": frappe.session.user},
-                after_commit=True,
-            )
+    if any_saved:
+        # Explicit commit flushes all after_commit=True realtime events
+        # queued by doc.save() → notify_update() in the loop above.
         frappe.db.commit()
 
     return {"errors": errors}
