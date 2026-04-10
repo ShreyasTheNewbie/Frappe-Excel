@@ -6195,3 +6195,171 @@ def get_all_roles():
 		pluck="name",
 		order_by="name asc",
 	)
+
+
+# ── V3.4.4 — Access Profiles (Role Profiles + Module Profiles) ────────────────
+
+
+@excel_whitelist(roles=["System Manager"])
+def get_access_profiles():
+	"""
+	Single round-trip for the Access Profiles tab.
+	4 lightweight queries merged in Python — O(profiles + assignments + modules).
+	Returns all role profiles, module profiles, and installed module names.
+	"""
+	# ── Role Profiles ──────────────────────────────────────────────────────
+	rp_rows = frappe.get_all("Role Profile", fields=["name"], order_by="name asc")
+
+	if rp_rows:
+		rp_counts = {
+			r.role_profile_name: r.cnt
+			for r in frappe.db.sql(
+				"SELECT role_profile_name, COUNT(*) AS cnt"
+				" FROM `tabUser`"
+				" WHERE role_profile_name IS NOT NULL AND role_profile_name != ''"
+				"   AND enabled = 1"
+				" GROUP BY role_profile_name",
+				as_dict=True,
+			)
+		}
+		rp_role_map = {}
+		for r in frappe.get_all(
+			"Has Role",
+			filters={"parenttype": "Role Profile"},
+			fields=["parent", "role"],
+			order_by="None",
+		):
+			rp_role_map.setdefault(r.parent, []).append(r.role)
+	else:
+		rp_counts, rp_role_map = {}, {}
+
+	role_profiles = [
+		{
+			"name":       rp.name,
+			"user_count": rp_counts.get(rp.name, 0),
+			"roles":      rp_role_map.get(rp.name, []),
+		}
+		for rp in rp_rows
+	]
+
+	# ── Module Profiles ────────────────────────────────────────────────────
+	mp_rows = frappe.get_all("Module Profile", fields=["name"], order_by="name asc")
+
+	if mp_rows:
+		mp_counts = {
+			r.module_profile: r.cnt
+			for r in frappe.db.sql(
+				"SELECT module_profile, COUNT(*) AS cnt"
+				" FROM `tabUser`"
+				" WHERE module_profile IS NOT NULL AND module_profile != ''"
+				"   AND enabled = 1"
+				" GROUP BY module_profile",
+				as_dict=True,
+			)
+		}
+		mp_mod_map = {}
+		for r in frappe.get_all(
+			"Block Module",
+			filters={"parenttype": "Module Profile"},
+			fields=["parent", "module"],
+			order_by="None",
+		):
+			mp_mod_map.setdefault(r.parent, []).append(r.module)
+	else:
+		mp_counts, mp_mod_map = {}, {}
+
+	module_profiles = [
+		{
+			"name":            mp.name,
+			"user_count":      mp_counts.get(mp.name, 0),
+			"blocked_modules": mp_mod_map.get(mp.name, []),
+		}
+		for mp in mp_rows
+	]
+
+	# ── All installed modules ──────────────────────────────────────────────
+	from frappe.config import get_modules_from_all_apps
+	all_modules = sorted(
+		m["module_name"]
+		for m in get_modules_from_all_apps()
+		if m.get("module_name")
+	)
+
+	return {
+		"role_profiles":   role_profiles,
+		"module_profiles": module_profiles,
+		"all_modules":     all_modules,
+	}
+
+
+@excel_whitelist(roles=["System Manager"], methods=["POST"], audit=True)
+def save_role_profile(profile_name, roles):
+	"""
+	Replace the full role list for a Role Profile in one ORM save.
+	Frappe's on_update() queues user-sync automatically after commit.
+	roles: JSON-encoded list of role name strings.
+	"""
+	import json as _json
+	role_list = _json.loads(roles) if isinstance(roles, str) else list(roles)
+
+	doc = frappe.get_doc("Role Profile", profile_name)
+	doc.roles = []
+	for role in role_list:
+		doc.append("roles", {"role": role})
+	doc.save(ignore_permissions=True)
+
+
+@excel_whitelist(roles=["System Manager"], methods=["POST"], audit=True)
+def save_module_profile(profile_name, blocked_modules):
+	"""
+	Replace the full blocked_modules list for a Module Profile in one ORM save.
+	Frappe's on_update() queues user-sync automatically after commit.
+	blocked_modules: JSON-encoded list of module name strings.
+	"""
+	import json as _json
+	mod_list = _json.loads(blocked_modules) if isinstance(blocked_modules, str) else list(blocked_modules)
+
+	doc = frappe.get_doc("Module Profile", profile_name)
+	doc.block_modules = []
+	for module in mod_list:
+		doc.append("block_modules", {"module": module})
+	doc.save(ignore_permissions=True)
+
+
+@excel_whitelist(roles=["System Manager"], methods=["POST"], audit=True)
+def create_access_profile(profile_type, name):
+	"""
+	Create a new Role Profile or Module Profile.
+	profile_type: "role" | "module"
+	"""
+	name = (name or "").strip()
+	if not name:
+		frappe.throw(_("Profile name cannot be empty."))
+
+	if profile_type == "role":
+		if frappe.db.exists("Role Profile", name):
+			frappe.throw(_("Role Profile {0} already exists.").format(frappe.bold(name)))
+		doc = frappe.new_doc("Role Profile")
+		doc.role_profile = name
+		doc.insert(ignore_permissions=True)
+	elif profile_type == "module":
+		if frappe.db.exists("Module Profile", name):
+			frappe.throw(_("Module Profile {0} already exists.").format(frappe.bold(name)))
+		doc = frappe.new_doc("Module Profile")
+		doc.module_profile_name = name
+		doc.insert(ignore_permissions=True)
+	else:
+		frappe.throw(_("Invalid profile_type."))
+
+	return {"name": doc.name}
+
+
+@excel_whitelist(roles=["System Manager"], methods=["POST"], audit=True)
+def delete_access_profile(profile_type, name):
+	"""Delete a Role Profile or Module Profile."""
+	if profile_type == "role":
+		frappe.delete_doc("Role Profile", name, ignore_permissions=True)
+	elif profile_type == "module":
+		frappe.delete_doc("Module Profile", name, ignore_permissions=True)
+	else:
+		frappe.throw(_("Invalid profile_type."))

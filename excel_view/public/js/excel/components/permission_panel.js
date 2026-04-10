@@ -85,6 +85,16 @@ frappe.views.excel.PermissionPanel = class PermissionPanel {
 		this._flashing    = new Set(); // "row:col" cells currently flashing green
 		this.$panel       = null;
 		this._active_tab  = "roles";
+		// ── Access Profiles tab (Tab 3 — lazy loaded) ─────────────────────
+		this._prof_loaded  = false;
+		this._rp_data      = new Map(); // profile_name → {user_count, roles: Set<string>}
+		this._mp_data      = new Map(); // profile_name → {user_count, blocked: Set<string>}
+		this._all_modules  = [];
+		this._sel_rp       = null;      // currently selected role profile name
+		this._sel_mp       = null;      // currently selected module profile name
+		this._prof_sub     = "role_profiles"; // active sub-tab
+		this._prof_timers  = {};        // debounce timers keyed by profile name
+		this._prof_pending = 0;         // in-flight profile saves
 	}
 
 	// ── Public API ────────────────────────────────────────────────────────────
@@ -105,6 +115,10 @@ frappe.views.excel.PermissionPanel = class PermissionPanel {
 		this._data  = [];
 		this._roles = [];
 		this._flashing.clear();
+		this._rp_data.clear();
+		this._mp_data.clear();
+		Object.values(this._prof_timers).forEach(clearTimeout);
+		this._prof_timers = {};
 	}
 
 	// ── HTML ──────────────────────────────────────────────────────────────────
@@ -141,6 +155,7 @@ frappe.views.excel.PermissionPanel = class PermissionPanel {
 			<div class="ev-perm-tabs">
 				<div class="ev-perm-tab ev-perm-tab--active" data-tab="roles">${__("Role Permissions")}</div>
 				<div class="ev-perm-tab" data-tab="fields">${__("Field Levels")}</div>
+				<div class="ev-perm-tab" data-tab="profiles">${__("Access Profiles")}</div>
 			</div>
 
 			<!-- ── Tab 1: Role Permissions ──────────────────────────────── -->
@@ -196,6 +211,97 @@ frappe.views.excel.PermissionPanel = class PermissionPanel {
 				<div class="ev-perm-field-list"></div>
 			</div>
 
+			<!-- ── Tab 3: Access Profiles ──────────────────────────────── -->
+			<div class="ev-perm-pane ev-prof-pane-root" data-pane="profiles">
+
+				<!-- Sub-tab bar -->
+				<div class="ev-prof-sub-tabs">
+					<div class="ev-prof-sub-tab ev-prof-sub-tab--active" data-subtab="role_profiles">
+						${__("Role Profiles")}
+					</div>
+					<div class="ev-prof-sub-tab" data-subtab="module_profiles">
+						${__("Module Profiles")}
+					</div>
+				</div>
+
+				<!-- Role Profiles sub-pane -->
+				<div class="ev-prof-sub-pane ev-prof-sub-pane--active" data-subpane="role_profiles">
+					<div class="ev-prof-split">
+						<div class="ev-prof-list-col">
+							<div class="ev-prof-list" id="ev-rp-list">
+								<div class="ev-prof-loading">${__("Loading…")}</div>
+							</div>
+							<div class="ev-prof-new-row">
+								<input class="ev-prof-new-name" data-ptype="role"
+									placeholder="${__("New profile name…")}"
+									autocomplete="off" spellcheck="false">
+								<button class="ev-prof-create-btn" data-ptype="role"
+									title="${__("Create")}">+</button>
+							</div>
+						</div>
+						<div class="ev-prof-detail-col">
+							<div class="ev-prof-detail-hdr">
+								<span class="ev-prof-detail-title">${__("Select a profile")}</span>
+								<button class="ev-prof-del-btn" data-ptype="role" style="display:none">
+									${__("Delete")}
+								</button>
+							</div>
+							<div class="ev-prof-search-wrap">
+								<svg class="ev-perm-search-icon" width="12" height="12" viewBox="0 0 16 16"
+									fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+									<circle cx="6.5" cy="6.5" r="4.5"/>
+									<line x1="10.5" y1="10.5" x2="14" y2="14"/>
+								</svg>
+								<input class="ev-prof-item-search" data-for="rp"
+									placeholder="${__("Search roles…")}" disabled>
+							</div>
+							<div class="ev-prof-checklist" id="ev-rp-checklist">
+								<div class="ev-prof-empty">${__("← Select a profile")}</div>
+							</div>
+						</div>
+					</div>
+				</div>
+
+				<!-- Module Profiles sub-pane -->
+				<div class="ev-prof-sub-pane" data-subpane="module_profiles">
+					<div class="ev-prof-split">
+						<div class="ev-prof-list-col">
+							<div class="ev-prof-list" id="ev-mp-list">
+								<div class="ev-prof-loading">${__("Loading…")}</div>
+							</div>
+							<div class="ev-prof-new-row">
+								<input class="ev-prof-new-name" data-ptype="module"
+									placeholder="${__("New profile name…")}"
+									autocomplete="off" spellcheck="false">
+								<button class="ev-prof-create-btn" data-ptype="module"
+									title="${__("Create")}">+</button>
+							</div>
+						</div>
+						<div class="ev-prof-detail-col">
+							<div class="ev-prof-detail-hdr">
+								<span class="ev-prof-detail-title">${__("Select a profile")}</span>
+								<button class="ev-prof-del-btn" data-ptype="module" style="display:none">
+									${__("Delete")}
+								</button>
+							</div>
+							<div class="ev-prof-search-wrap">
+								<svg class="ev-perm-search-icon" width="12" height="12" viewBox="0 0 16 16"
+									fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+									<circle cx="6.5" cy="6.5" r="4.5"/>
+									<line x1="10.5" y1="10.5" x2="14" y2="14"/>
+								</svg>
+								<input class="ev-prof-item-search" data-for="mp"
+									placeholder="${__("Search modules…")}" disabled>
+							</div>
+							<div class="ev-prof-checklist" id="ev-mp-checklist">
+								<div class="ev-prof-empty">${__("← Select a profile")}</div>
+							</div>
+						</div>
+					</div>
+				</div>
+
+			</div>
+
 			<!-- ── Footer ───────────────────────────────────────────────── -->
 			<div class="ev-perm-footer">
 				<button class="ev-perm-reset-btn ev-perm-footer-btn ev-perm-footer-btn--danger"
@@ -239,6 +345,42 @@ frappe.views.excel.PermissionPanel = class PermissionPanel {
 
 		$p.on("click", ".ev-perm-add-btn",   () => this._add_role());
 		$p.on("click", ".ev-perm-reset-btn", () => this._confirm_reset());
+
+		// ── Access Profiles tab ───────────────────────────────────────────
+		$p.on("click", ".ev-prof-sub-tab",  (e) =>
+			this._switch_prof_sub($(e.currentTarget).data("subtab")));
+
+		$p.on("click", ".ev-prof-list-item", (e) => {
+			const $item = $(e.currentTarget);
+			const ptype = $item.closest(".ev-prof-sub-pane").data("subpane");
+			if (ptype === "role_profiles")   this._select_rp($item.data("name"));
+			else                              this._select_mp($item.data("name"));
+		});
+
+		$p.on("change", ".ev-rp-chk", (e) =>
+			this._toggle_rp_role(e.target.dataset.role, e.target.checked));
+
+		$p.on("change", ".ev-mp-chk", (e) =>
+			this._toggle_mp_module(e.target.dataset.mod, e.target.checked));
+
+		$p.on("input", ".ev-prof-item-search", (e) => {
+			const $inp = $(e.currentTarget);
+			if ($inp.data("for") === "rp") this._render_rp_checklist($inp.val());
+			else                            this._render_mp_checklist($inp.val());
+		});
+
+		$p.on("click", ".ev-prof-create-btn", (e) =>
+			this._create_profile($(e.currentTarget).data("ptype")));
+
+		$p.on("keydown", ".ev-prof-new-name", (e) => {
+			if (e.key === "Enter") this._create_profile($(e.currentTarget).data("ptype"));
+		});
+
+		$p.on("click", ".ev-prof-del-btn", (e) => {
+			const ptype = $(e.currentTarget).data("ptype");
+			const name  = ptype === "role" ? this._sel_rp : this._sel_mp;
+			if (name) this._delete_profile(ptype, name);
+		});
 	}
 
 	_switch_tab(tab) {
@@ -248,8 +390,13 @@ frappe.views.excel.PermissionPanel = class PermissionPanel {
 		this.$panel.find(".ev-perm-pane").removeClass("ev-perm-pane--active");
 		this.$panel.find(`.ev-perm-pane[data-pane="${tab}"]`).addClass("ev-perm-pane--active");
 
+		// Show/hide the "Reset to Default" footer button — only relevant for roles tab
+		this.$panel.find(".ev-perm-reset-btn").toggle(tab === "roles");
+
 		if (tab === "fields" && !this._fields.length) {
 			this._load_fields();
+		} else if (tab === "profiles" && !this._prof_loaded) {
+			this._load_profiles();
 		} else if (tab === "roles" && this._hot) {
 			requestAnimationFrame(() => this._hot?.render());
 		}
@@ -646,6 +793,415 @@ frappe.views.excel.PermissionPanel = class PermissionPanel {
 				},
 			});
 		}, 400);
+	}
+
+	// ── Tab 3: Access Profiles ────────────────────────────────────────────────
+
+	/**
+	 * Lazy-load all profile data in one round trip.
+	 * get_access_profiles() returns role profiles + module profiles + all modules.
+	 */
+	_load_profiles() {
+		this._set_badge("loading");
+		frappe.call({
+			method: "excel_view.api.get_access_profiles",
+			freeze: false,
+		}).then(r => {
+			const d = r.message || {};
+			this._all_modules = d.all_modules || [];
+
+			// Build Maps from arrays for O(1) lookup
+			this._rp_data = new Map(
+				(d.role_profiles || []).map(p => [p.name, {
+					user_count: p.user_count,
+					roles: new Set(p.roles),
+				}])
+			);
+			this._mp_data = new Map(
+				(d.module_profiles || []).map(p => [p.name, {
+					user_count: p.user_count,
+					blocked: new Set(p.blocked_modules),
+				}])
+			);
+
+			this._prof_loaded = true;
+			this._render_rp_list();
+			this._render_mp_list();
+			this._set_badge("live");
+		}).catch(() => {
+			this._set_badge("error");
+			this.$panel?.find(".ev-prof-loading").text(__("Failed to load."));
+		});
+	}
+
+	// ── Sub-tab switching ─────────────────────────────────────────────────────
+
+	_switch_prof_sub(subtab) {
+		this._prof_sub = subtab;
+		const $p = this.$panel;
+		$p.find(".ev-prof-sub-tab").removeClass("ev-prof-sub-tab--active");
+		$p.find(`.ev-prof-sub-tab[data-subtab="${subtab}"]`).addClass("ev-prof-sub-tab--active");
+		$p.find(".ev-prof-sub-pane").removeClass("ev-prof-sub-pane--active");
+		$p.find(`.ev-prof-sub-pane[data-subpane="${subtab}"]`).addClass("ev-prof-sub-pane--active");
+	}
+
+	// ── Profile list rendering (left column) ─────────────────────────────────
+
+	/** Render left-column list of Role Profiles. O(n) DocumentFragment. */
+	_render_rp_list() {
+		const el = this.$panel[0].querySelector("#ev-rp-list");
+		if (!el) return;
+		const frag = document.createDocumentFragment();
+		if (!this._rp_data.size) {
+			const d = document.createElement("div");
+			d.className = "ev-prof-empty";
+			d.textContent = __("No role profiles yet.");
+			frag.appendChild(d);
+		} else {
+			for (const [name, prof] of this._rp_data) {
+				const div = document.createElement("div");
+				div.className = "ev-prof-list-item" +
+					(name === this._sel_rp ? " ev-prof-list-item--active" : "");
+				div.dataset.name = name;
+				div.innerHTML =
+					`<span class="ev-prof-item-name">${frappe.utils.escape_html(name)}</span>` +
+					(prof.user_count
+						? `<span class="ev-prof-item-badge">${prof.user_count}</span>`
+						: "");
+				frag.appendChild(div);
+			}
+		}
+		el.innerHTML = "";
+		el.appendChild(frag);
+	}
+
+	/** Render left-column list of Module Profiles. O(n) DocumentFragment. */
+	_render_mp_list() {
+		const el = this.$panel[0].querySelector("#ev-mp-list");
+		if (!el) return;
+		const frag = document.createDocumentFragment();
+		if (!this._mp_data.size) {
+			const d = document.createElement("div");
+			d.className = "ev-prof-empty";
+			d.textContent = __("No module profiles yet.");
+			frag.appendChild(d);
+		} else {
+			for (const [name, prof] of this._mp_data) {
+				const div = document.createElement("div");
+				div.className = "ev-prof-list-item" +
+					(name === this._sel_mp ? " ev-prof-list-item--active" : "");
+				div.dataset.name = name;
+				div.innerHTML =
+					`<span class="ev-prof-item-name">${frappe.utils.escape_html(name)}</span>` +
+					(prof.user_count
+						? `<span class="ev-prof-item-badge">${prof.user_count}</span>`
+						: "");
+				frag.appendChild(div);
+			}
+		}
+		el.innerHTML = "";
+		el.appendChild(frag);
+	}
+
+	// ── Profile selection ─────────────────────────────────────────────────────
+
+	_select_rp(name) {
+		this._sel_rp = name;
+		// Highlight selected item
+		this.$panel.find("#ev-rp-list .ev-prof-list-item")
+			.removeClass("ev-prof-list-item--active")
+			.filter(`[data-name="${CSS.escape(name)}"]`)
+			.addClass("ev-prof-list-item--active");
+		// Update header
+		this.$panel.find('.ev-prof-sub-pane[data-subpane="role_profiles"] .ev-prof-detail-title')
+			.text(name);
+		this.$panel.find('.ev-prof-sub-pane[data-subpane="role_profiles"] .ev-prof-del-btn')
+			.show();
+		this.$panel.find('.ev-prof-item-search[data-for="rp"]').val("").prop("disabled", false);
+		this._render_rp_checklist("");
+	}
+
+	_select_mp(name) {
+		this._sel_mp = name;
+		this.$panel.find("#ev-mp-list .ev-prof-list-item")
+			.removeClass("ev-prof-list-item--active")
+			.filter(`[data-name="${CSS.escape(name)}"]`)
+			.addClass("ev-prof-list-item--active");
+		this.$panel.find('.ev-prof-sub-pane[data-subpane="module_profiles"] .ev-prof-detail-title')
+			.text(name);
+		this.$panel.find('.ev-prof-sub-pane[data-subpane="module_profiles"] .ev-prof-del-btn')
+			.show();
+		this.$panel.find('.ev-prof-item-search[data-for="mp"]').val("").prop("disabled", false);
+		this._render_mp_checklist("");
+	}
+
+	// ── Checklist rendering (right column) ───────────────────────────────────
+
+	/**
+	 * Render role checklist for selected role profile.
+	 * Uses DocumentFragment for single DOM insertion — O(n) where n = role count.
+	 * roles list comes from this._roles (loaded by Tab 1) or keys from _rp_data.
+	 */
+	_render_rp_checklist(search) {
+		const el = this.$panel[0].querySelector("#ev-rp-checklist");
+		if (!el || !this._sel_rp) return;
+		const profile = this._rp_data.get(this._sel_rp);
+		if (!profile) return;
+
+		// Prefer full role list; fall back to assigned roles only
+		const all = this._roles.length ? this._roles : [...profile.roles].sort();
+		const q = (search || "").toLowerCase().trim();
+		const frag = document.createDocumentFragment();
+		let count = 0;
+
+		for (const role of all) {
+			if (q && !role.toLowerCase().includes(q)) continue;
+			count++;
+			const checked = profile.roles.has(role);
+			const div = document.createElement("div");
+			div.className = "ev-prof-check-item";
+			const esc = frappe.utils.escape_html(role);
+			div.innerHTML =
+				`<label class="ev-prof-chk-label">` +
+				`<input type="checkbox" class="ev-rp-chk"` +
+				` data-role="${esc}"${checked ? " checked" : ""}>` +
+				`<span>${esc}</span></label>`;
+			frag.appendChild(div);
+		}
+
+		el.innerHTML = "";
+		if (!count) {
+			el.innerHTML = `<div class="ev-prof-empty">${__("No roles match")}</div>`;
+		} else {
+			el.appendChild(frag);
+		}
+	}
+
+	/**
+	 * Render module checklist for selected module profile.
+	 * Checked = module is BLOCKED (hidden) for users with this profile.
+	 */
+	_render_mp_checklist(search) {
+		const el = this.$panel[0].querySelector("#ev-mp-checklist");
+		if (!el || !this._sel_mp) return;
+		const profile = this._mp_data.get(this._sel_mp);
+		if (!profile) return;
+
+		const all = this._all_modules.length ? this._all_modules : [...profile.blocked].sort();
+		const q = (search || "").toLowerCase().trim();
+		const frag = document.createDocumentFragment();
+		let count = 0;
+
+		for (const mod of all) {
+			if (q && !mod.toLowerCase().includes(q)) continue;
+			count++;
+			const blocked = profile.blocked.has(mod);
+			const div = document.createElement("div");
+			div.className = "ev-prof-check-item" + (blocked ? " ev-prof-chk-blocked" : "");
+			const esc = frappe.utils.escape_html(mod);
+			div.innerHTML =
+				`<label class="ev-prof-chk-label">` +
+				`<input type="checkbox" class="ev-mp-chk"` +
+				` data-mod="${esc}"${blocked ? " checked" : ""}>` +
+				`<span>${esc}</span>` +
+				(blocked ? `<span class="ev-prof-blocked-tag">${__("hidden")}</span>` : "") +
+				`</label>`;
+			frag.appendChild(div);
+		}
+
+		el.innerHTML = "";
+		if (!count) {
+			el.innerHTML = `<div class="ev-prof-empty">${__("No modules match")}</div>`;
+		} else {
+			el.appendChild(frag);
+		}
+	}
+
+	// ── Toggle + debounced batch save ─────────────────────────────────────────
+
+	/**
+	 * Optimistically update local Set, then debounce-save the full role list.
+	 * Batches rapid multi-checkbox changes into a single API call.
+	 */
+	_toggle_rp_role(role, checked) {
+		if (!this._sel_rp) return;
+		const profile = this._rp_data.get(this._sel_rp);
+		if (!profile) return;
+		// Optimistic local update
+		if (checked) profile.roles.add(role);
+		else          profile.roles.delete(role);
+		// Re-render blocked tags in checklist (only the one item changed)
+		this._debounce_save_rp(this._sel_rp);
+	}
+
+	_toggle_mp_module(mod, checked) {
+		if (!this._sel_mp) return;
+		const profile = this._mp_data.get(this._sel_mp);
+		if (!profile) return;
+		if (checked) profile.blocked.add(mod);
+		else          profile.blocked.delete(mod);
+		// Re-render the changed item to toggle the "hidden" tag
+		const el = this.$panel[0].querySelector(`.ev-mp-chk[data-mod="${CSS.escape(mod)}"]`);
+		if (el) {
+			const item = el.closest(".ev-prof-check-item");
+			if (item) {
+				item.classList.toggle("ev-prof-chk-blocked", checked);
+				const tag = item.querySelector(".ev-prof-blocked-tag");
+				if (checked && !tag) {
+					const span = document.createElement("span");
+					span.className = "ev-prof-blocked-tag";
+					span.textContent = __("hidden");
+					el.closest("label").appendChild(span);
+				} else if (!checked && tag) {
+					tag.remove();
+				}
+			}
+		}
+		this._debounce_save_mp(this._sel_mp);
+	}
+
+	_debounce_save_rp(name) {
+		clearTimeout(this._prof_timers[`rp:${name}`]);
+		this._prof_pending++;
+		this._set_badge("saving");
+		this._prof_timers[`rp:${name}`] = setTimeout(() => {
+			const profile = this._rp_data.get(name);
+			if (!profile) return;
+			frappe.call({
+				method: "excel_view.api.save_role_profile",
+				args: {
+					profile_name: name,
+					roles: JSON.stringify([...profile.roles]),
+				},
+				freeze: false,
+				callback: () => {
+					this._prof_pending = Math.max(0, this._prof_pending - 1);
+					if (!this._prof_pending && !this._pending) this._set_badge("live");
+				},
+				error: () => {
+					this._prof_pending = Math.max(0, this._prof_pending - 1);
+					this._set_badge("error");
+					frappe.show_alert({ message: __("Role profile could not be saved."), indicator: "red" });
+					// Reload to restore server state
+					this._reload_profiles();
+				},
+			});
+		}, 500);
+	}
+
+	_debounce_save_mp(name) {
+		clearTimeout(this._prof_timers[`mp:${name}`]);
+		this._prof_pending++;
+		this._set_badge("saving");
+		this._prof_timers[`mp:${name}`] = setTimeout(() => {
+			const profile = this._mp_data.get(name);
+			if (!profile) return;
+			frappe.call({
+				method: "excel_view.api.save_module_profile",
+				args: {
+					profile_name: name,
+					blocked_modules: JSON.stringify([...profile.blocked]),
+				},
+				freeze: false,
+				callback: () => {
+					this._prof_pending = Math.max(0, this._prof_pending - 1);
+					if (!this._prof_pending && !this._pending) this._set_badge("live");
+				},
+				error: () => {
+					this._prof_pending = Math.max(0, this._prof_pending - 1);
+					this._set_badge("error");
+					frappe.show_alert({ message: __("Module profile could not be saved."), indicator: "red" });
+					this._reload_profiles();
+				},
+			});
+		}, 500);
+	}
+
+	// ── CRUD ─────────────────────────────────────────────────────────────────
+
+	_create_profile(ptype) {
+		const $inp = this.$panel.find(`.ev-prof-new-name[data-ptype="${ptype}"]`);
+		const name = ($inp.val() || "").trim();
+		if (!name) {
+			frappe.show_alert({ message: __("Enter a profile name."), indicator: "orange" });
+			$inp[0]?.focus();
+			return;
+		}
+		$inp.val("").prop("disabled", true);
+		this._set_badge("saving");
+		frappe.call({
+			method: "excel_view.api.create_access_profile",
+			args: { profile_type: ptype, name },
+			freeze: false,
+			callback: (r) => {
+				const created_name = r.message?.name || name;
+				// Optimistically add to local map
+				if (ptype === "role") {
+					this._rp_data.set(created_name, { user_count: 0, roles: new Set() });
+					this._render_rp_list();
+					this._select_rp(created_name);
+				} else {
+					this._mp_data.set(created_name, { user_count: 0, blocked: new Set() });
+					this._render_mp_list();
+					this._select_mp(created_name);
+				}
+				$inp.prop("disabled", false);
+				this._set_badge("live");
+			},
+			error: () => {
+				$inp.prop("disabled", false);
+				this._set_badge("error");
+			},
+		});
+	}
+
+	_delete_profile(ptype, name) {
+		frappe.confirm(
+			__("Delete {0} <b>{1}</b>? Users assigned to it will lose these settings.",
+				[ptype === "role" ? __("Role Profile") : __("Module Profile"),
+				 frappe.utils.escape_html(name)]),
+			() => {
+				this._set_badge("saving");
+				frappe.call({
+					method: "excel_view.api.delete_access_profile",
+					args: { profile_type: ptype, name },
+					freeze: false,
+					callback: () => {
+						if (ptype === "role") {
+							this._rp_data.delete(name);
+							this._sel_rp = null;
+							this._render_rp_list();
+							this.$panel.find('#ev-rp-checklist').html(
+								`<div class="ev-prof-empty">${__("← Select a profile")}</div>`);
+							this.$panel.find('.ev-prof-sub-pane[data-subpane="role_profiles"] .ev-prof-detail-title')
+								.text(__("Select a profile"));
+							this.$panel.find('.ev-prof-sub-pane[data-subpane="role_profiles"] .ev-prof-del-btn')
+								.hide();
+						} else {
+							this._mp_data.delete(name);
+							this._sel_mp = null;
+							this._render_mp_list();
+							this.$panel.find('#ev-mp-checklist').html(
+								`<div class="ev-prof-empty">${__("← Select a profile")}</div>`);
+							this.$panel.find('.ev-prof-sub-pane[data-subpane="module_profiles"] .ev-prof-detail-title')
+								.text(__("Select a profile"));
+							this.$panel.find('.ev-prof-sub-pane[data-subpane="module_profiles"] .ev-prof-del-btn')
+								.hide();
+						}
+						this._set_badge("live");
+					},
+					error: () => this._set_badge("error"),
+				});
+			}
+		);
+	}
+
+	/** Hard-reload profiles after a save error to restore server state. */
+	_reload_profiles() {
+		this._prof_loaded = false;
+		this._sel_rp = null;
+		this._sel_mp = null;
+		this._load_profiles();
 	}
 
 	// ── Status badge ──────────────────────────────────────────────────────────
