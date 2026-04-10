@@ -302,14 +302,12 @@ def bulk_set_value(doctype: str, updates: str) -> dict:
             continue
         try:
             doc = frappe.get_doc(doctype, name)
-            if doc.docstatus == 1:
-                frappe.throw(
-                    _("{0} is submitted — edit is not allowed. Please amend the document first.").format(
-                        frappe.bold(name)
-                    )
-                )
             for fieldname, value in fields.items():
                 doc.set(fieldname, value)
+            # doc.save() enforces all Frappe rules natively:
+            # - submitted docs: only allow_on_submit fields may be changed
+            # - cancelled docs: no edits allowed
+            # - validate, before_save, after_save hooks all run
             doc.save()
             any_saved = True
         except Exception as exc:
