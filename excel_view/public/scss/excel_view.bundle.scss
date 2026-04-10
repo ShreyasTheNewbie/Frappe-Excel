@@ -14939,3 +14939,25 @@ $fc-card-colors: (
 	}
 }
 
+// ── Excel View — layout overrides ─────────────────────────────────────────────
+// Frappe sets data-route on <body> synchronously on every route change, so these
+// rules activate/deactivate instantly with zero JS timing dependency.
+// Covers /app/<doctype>/view/excel (route = "List/<Doctype>/Excel").
+body[data-route$="/Excel"],
+body[data-route*="/Excel/"] {
+	// Collapse the list sidebar — grid needs full width.
+	.layout-side-section {
+		display: none !important;
+	}
+	.layout-main-section-wrapper {
+		flex: 1 !important;
+		max-width: 100% !important;
+	}
+
+	// Hide the "Add <DocType>" primary action button — records are inserted
+	// directly from the grid's bottom insert row.
+	.page-actions .primary-action {
+		display: none !important;
+	}
+}
+

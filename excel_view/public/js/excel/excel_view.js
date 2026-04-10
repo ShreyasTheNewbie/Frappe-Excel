@@ -6,6 +6,11 @@
  *
  * Class discovery: ListFactory looks for frappe.views["ExcelView"]
  * Route: /app/{doctype}/view/excel
+ *
+ * Sidebar collapse and primary-button hiding are handled entirely in
+ * excel_view.bundle.scss via body[data-route$="/Excel"] selectors.
+ * Frappe sets data-route on <body> synchronously on every route change,
+ * so there are no JS timing dependencies for those visual concerns.
  */
 
 frappe.provide("frappe.views");
@@ -217,8 +222,9 @@ frappe.views.ExcelView = class ExcelView extends frappe.views.ListView {
 	// ── Sidebar ───────────────────────────────────────────────────────────────
 
 	toggle_side_bar() {
-		super.toggle_side_bar();
-		// HOT needs an explicit re-render after the container width changes
+		// Sidebar is collapsed via CSS (body[data-route$="/Excel"]) — toggling
+		// it while in Excel View would break the grid layout.  Suppress the
+		// action but still re-render HOT in case the container shifted.
 		requestAnimationFrame(() => {
 			this.excel_board?.resize();
 		});
@@ -232,6 +238,9 @@ frappe.views.ExcelView = class ExcelView extends frappe.views.ListView {
 	 * frappe.router re-creates the view on each route change, so the
 	 * old instance will be garbage-collected. Explicitly destroy HOT
 	 * to free memory and unbind global event listeners.
+	 *
+	 * Sidebar and primary-button visibility restore automatically when
+	 * data-route changes — no manual DOM cleanup needed.
 	 */
 	on_hide() {
 		$(".page-head").removeClass("ev-page-active");
