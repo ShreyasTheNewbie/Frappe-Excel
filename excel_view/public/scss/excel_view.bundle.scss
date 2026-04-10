@@ -15252,3 +15252,376 @@ body[data-route*="/Excel/"] {
 	font-style: italic;
 }
 
+// ── ev_ui.js — EVModal / EVToast / show_error ─────────────────────────────────
+//
+// Excel color palette tokens (reuse .ev-page vars where the page is mounted,
+// fall back to CSS-var equivalents for components mounted on <body> directly).
+//
+// Accent green : #1d6f42  (--ev-green)
+// Surfaces     : white / var(--card-bg) in light; #1e1e1e in dark
+// Border       : #d4d4d4 / #3a3a3a
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── EVModal ───────────────────────────────────────────────────────────────────
+
+.evm-overlay {
+	position: fixed;
+	inset: 0;
+	z-index: 1200;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: rgba(0, 0, 0, 0);
+	-webkit-backdrop-filter: blur(0px);
+	backdrop-filter: blur(0px);
+	transition: background 0.18s ease, backdrop-filter 0.18s ease, -webkit-backdrop-filter 0.18s ease;
+	pointer-events: none;
+
+	&.evm-overlay--in {
+		background: rgba(0, 0, 0, 0.38);
+		-webkit-backdrop-filter: blur(2px);
+		backdrop-filter: blur(2px);
+		pointer-events: auto;
+
+		.evm-card {
+			opacity: 1;
+			transform: translateY(0) scale(1);
+		}
+	}
+}
+
+.evm-card {
+	position: relative;
+	width: 520px;
+	max-width: calc(100vw - 32px);
+	max-height: calc(100vh - 48px);
+	display: flex;
+	flex-direction: column;
+	background: var(--card-bg, #fff);
+	border: 1px solid #d4d4d4;
+	border-radius: 8px;
+	box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18), 0 2px 8px rgba(0, 0, 0, 0.1);
+	opacity: 0;
+	transform: translateY(-10px) scale(0.97);
+	transition: opacity 0.18s ease, transform 0.18s ease;
+	overflow: hidden;
+
+	&.evm--sm { width: 420px; }
+	&.evm--lg { width: 680px; }
+}
+
+.evm-header {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 14px 16px 13px;
+	border-bottom: 1px solid #d4d4d4;
+	background: #1d6f42;
+	flex-shrink: 0;
+}
+
+.evm-title {
+	flex: 1;
+	font-size: 13px;
+	font-weight: 600;
+	color: #fff;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.evm-close {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 24px;
+	height: 24px;
+	padding: 0;
+	background: transparent;
+	border: none;
+	border-radius: 4px;
+	color: rgba(255, 255, 255, 0.8);
+	cursor: pointer;
+	flex-shrink: 0;
+	transition: background 0.12s, color 0.12s;
+
+	&:hover {
+		background: rgba(255, 255, 255, 0.18);
+		color: #fff;
+	}
+
+	svg { display: block; }
+}
+
+.evm-body {
+	flex: 1;
+	overflow-y: auto;
+	padding: 18px 20px;
+	font-size: 13px;
+	color: var(--text-color, #1a1a1a);
+	line-height: 1.55;
+}
+
+.evm-footer {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 8px;
+	padding: 12px 20px;
+	border-top: 1px solid #d4d4d4;
+	flex-shrink: 0;
+}
+
+.evm-btn {
+	display: inline-flex;
+	align-items: center;
+	height: 30px;
+	padding: 0 14px;
+	font-size: 12px;
+	font-weight: 500;
+	border-radius: 5px;
+	border: 1px solid transparent;
+	cursor: pointer;
+	transition: background 0.12s, border-color 0.12s, color 0.12s;
+	white-space: nowrap;
+
+	&--primary {
+		background: #1d6f42;
+		border-color: #1d6f42;
+		color: #fff;
+		&:hover { background: #185c37; border-color: #185c37; }
+	}
+	&--danger {
+		background: #dc2626;
+		border-color: #dc2626;
+		color: #fff;
+		&:hover { background: #b91c1c; border-color: #b91c1c; }
+	}
+	&--default {
+		background: var(--control-bg, #f5f5f5);
+		border-color: #d4d4d4;
+		color: var(--text-color, #1a1a1a);
+		&:hover { background: var(--subtle-fg, #ebebeb); }
+	}
+}
+
+// ── EVToast ───────────────────────────────────────────────────────────────────
+
+.evt-stack {
+	position: fixed;
+	top: 16px;
+	right: 16px;
+	z-index: 1300;
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	pointer-events: none;
+}
+
+.evt {
+	display: flex;
+	align-items: flex-start;
+	gap: 10px;
+	width: 320px;
+	max-width: calc(100vw - 32px);
+	padding: 11px 12px 14px;
+	background: var(--card-bg, #fff);
+	border: 1px solid #d4d4d4;
+	border-left: 4px solid #d4d4d4;
+	border-radius: 7px;
+	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12), 0 1px 4px rgba(0, 0, 0, 0.06);
+	opacity: 0;
+	transform: translateX(14px);
+	transition: opacity 0.22s ease, transform 0.22s ease;
+	pointer-events: auto;
+	position: relative;
+	overflow: hidden;
+
+	&.evt--in {
+		opacity: 1;
+		transform: translateX(0);
+	}
+
+	// Type-based left border + icon color
+	&--success { border-left-color: #1d6f42; .evt-icon { color: #1d6f42; } }
+	&--error   { border-left-color: #dc2626; .evt-icon { color: #dc2626; } }
+	&--warning { border-left-color: #d97706; .evt-icon { color: #d97706; } }
+	&--info    { border-left-color: #2563eb; .evt-icon { color: #2563eb; } }
+}
+
+.evt-icon {
+	flex-shrink: 0;
+	width: 16px;
+	height: 16px;
+	margin-top: 1px;
+	svg { width: 16px; height: 16px; display: block; }
+}
+
+.evt-msg {
+	flex: 1;
+	font-size: 12.5px;
+	font-weight: 500;
+	color: var(--text-color, #1a1a1a);
+	line-height: 1.45;
+}
+
+.evt-x {
+	flex-shrink: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 18px;
+	height: 18px;
+	padding: 0;
+	background: transparent;
+	border: none;
+	border-radius: 3px;
+	color: var(--text-muted, #767676);
+	cursor: pointer;
+	margin-top: 1px;
+	transition: background 0.1s, color 0.1s;
+
+	&:hover { background: var(--subtle-fg, #ebebeb); color: var(--text-color, #1a1a1a); }
+	svg { width: 10px; height: 10px; display: block; }
+}
+
+.evt-bar-track {
+	position: absolute;
+	bottom: 0;
+	left: 0;
+	right: 0;
+	height: 3px;
+	background: transparent;
+}
+
+.evt-bar {
+	height: 100%;
+	width: 100%;
+	transition: width linear;
+	border-radius: 0 0 3px 0;
+
+	.evt--success & { background: #1d6f42; }
+	.evt--error   & { background: #dc2626; }
+	.evt--warning & { background: #d97706; }
+	.evt--info    & { background: #2563eb; }
+}
+
+// ── show_error (EVError dialog body) ─────────────────────────────────────────
+
+.eve-body {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+
+.eve-badge {
+	display: inline-flex;
+	align-items: center;
+	height: 22px;
+	padding: 0 10px;
+	border-radius: 11px;
+	font-size: 11px;
+	font-weight: 600;
+	letter-spacing: 0.02em;
+	text-transform: uppercase;
+	align-self: flex-start;
+
+	&--red    { background: #fee2e2; color: #b91c1c; }
+	&--orange { background: #ffedd5; color: #c2410c; }
+	&--yellow { background: #fef3c7; color: #92400e; }
+}
+
+.eve-msg {
+	margin: 0;
+	font-size: 13.5px;
+	font-weight: 500;
+	color: var(--text-color, #1a1a1a);
+	line-height: 1.5;
+}
+
+.eve-context {
+	margin: 0;
+	font-size: 12px;
+	color: var(--text-muted, #767676);
+}
+
+.eve-details {
+	margin-top: 4px;
+	border: 1px solid #d4d4d4;
+	border-radius: 5px;
+	overflow: hidden;
+
+	summary {
+		padding: 7px 12px;
+		font-size: 11.5px;
+		font-weight: 500;
+		color: var(--text-muted, #767676);
+		cursor: pointer;
+		-webkit-user-select: none;
+		user-select: none;
+		background: var(--subtle-fg, #f5f5f5);
+		list-style: none;
+
+		&::-webkit-details-marker { display: none; }
+		&::before { content: "▶ "; font-size: 9px; }
+	}
+
+	&[open] summary::before { content: "▼ "; }
+}
+
+.eve-trace {
+	margin: 0;
+	padding: 10px 12px;
+	font-family: var(--font-stack-mono, monospace);
+	font-size: 11px;
+	line-height: 1.6;
+	color: var(--text-muted, #767676);
+	overflow-x: auto;
+	white-space: pre;
+	background: var(--bg-color, #fafafa);
+	max-height: 240px;
+	overflow-y: auto;
+}
+
+// ── Dark theme overrides ──────────────────────────────────────────────────────
+
+[data-theme="dark"] {
+	.evm-card {
+		background: #1e1e1e;
+		border-color: #3a3a3a;
+		box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.3);
+	}
+	.evm-header { border-bottom-color: #3a3a3a; }
+	.evm-footer { border-top-color: #3a3a3a; }
+	.evm-btn--default {
+		background: #2a2a2a;
+		border-color: #3a3a3a;
+		color: #e0e0e0;
+		&:hover { background: #333; }
+	}
+
+	.evt {
+		background: #1e1e1e;
+		border-color: #3a3a3a;
+		box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+	}
+	.evt-msg { color: #e0e0e0; }
+	.evt-x {
+		color: #808080;
+		&:hover { background: #2a2a2a; color: #e0e0e0; }
+	}
+
+	.eve-badge {
+		&--red    { background: rgba(185, 28,  28,  0.2); color: #f87171; }
+		&--orange { background: rgba(194, 65,  12,  0.2); color: #fb923c; }
+		&--yellow { background: rgba(146, 64,  14,  0.2); color: #fbbf24; }
+	}
+	.eve-msg   { color: #e0e0e0; }
+	.eve-context { color: #808080; }
+	.eve-details {
+		border-color: #3a3a3a;
+		summary { background: #2a2a2a; color: #808080; }
+	}
+	.eve-trace { background: #141414; color: #808080; }
+}
+

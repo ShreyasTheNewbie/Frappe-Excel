@@ -57,6 +57,7 @@ if (!document.getElementById("ev-hot-css")) {
 
 // ── 2. Utilities ──────────────────────────────────────────────────────────────
 
+import "./utils/ev_ui.js";
 import "./utils/field_type_map.js";
 // V2.3: frappe_formula_plugin MUST be imported before formula_bridge.
 // registerFunctionPlugin() runs at module-eval time; HyperFormula.buildEmpty()

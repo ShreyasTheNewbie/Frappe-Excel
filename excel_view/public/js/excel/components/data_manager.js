@@ -127,20 +127,26 @@ frappe.views.excel.DataManager = class DataManager {
 			const r = await frappe.call({
 				method: "excel_view.api.bulk_set_value",
 				args: { doctype, updates: JSON.stringify(updates) },
+				// Suppress Frappe's default msgprint on error — we show show_error instead
+				error: () => {},
 			});
 			const errors = r.message?.errors || [];
 			if (errors.length) {
-				frappe.show_alert(
-					{ message: __("{0} record(s) failed to save", [errors.length]), indicator: "red" },
-					4
+				// Show the first error in the friendly dialog; toast a count if multiple
+				const first = errors[0];
+				frappe.views.excel.show_error(
+					{ _server_messages: JSON.stringify([JSON.stringify({ message: first.error })]) },
+					errors.length > 1
+						? __("{0} record(s) could not be saved", [errors.length])
+						: __("Saving {0}", [first.name])
 				);
 			} else {
 				this._dirty = false;
 				this._clear_dirty_indicator();
-				frappe.show_alert({ message: __("Saved"), indicator: "green" }, 1);
+				frappe.views.excel.toast(__("Saved"), "success", 2000);
 			}
-		} catch (_) {
-			frappe.show_alert({ message: __("Save failed — please retry"), indicator: "red" }, 4);
+		} catch (err) {
+			frappe.views.excel.show_error(err, __("Saving changes to {0}", [doctype]));
 		}
 	}
 

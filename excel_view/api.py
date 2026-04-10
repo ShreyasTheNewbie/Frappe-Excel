@@ -312,6 +312,11 @@ def bulk_set_value(doctype: str, updates: str) -> dict:
             any_saved = True
         except Exception as exc:
             errors.append({"name": name, "error": str(exc)})
+            # frappe.throw() logs the message to frappe.message_log before
+            # raising, so it would appear in _server_messages and trigger
+            # Frappe's default msgprint alongside our EVModal. Clear it so
+            # the error is shown only through our custom UI.
+            frappe.message_log.clear()
 
     if any_saved:
         # Explicit commit flushes all after_commit=True realtime events
