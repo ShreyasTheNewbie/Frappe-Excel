@@ -320,22 +320,84 @@ class AsyncFormulaManager {
 		}
 		this._agg_queue.clear();
 
+		// ── Client-side grouping ──────────────────────────────────────────────
+		// Queries sharing (aggr_type, doctype, fieldname, fk1, fk2-fk4 static
+		// filters) but differing only in fv1 are collapsed into one request
+		// object with fv1_list:[...].  100-row × 3-column = 300 objects → 3.
+		// Server returns results[g] as an array parallel to fv1_list.
+		// Queries with operator-in-fk1 (e.g. "amount >=") stay as solo scalars.
+		const group_map = new Map();  // sig → { payload, orig_indices }
+		const solo_orig = [];         // orig indices that cannot be grouped
+
+		for (let i = 0; i < queries.length; i++) {
+			const q   = queries[i];
+			const fk1 = q.fk1 || "";
+			const fv1 = q.fv1;
+			// Groupable: fk1 is a plain field name (no spaces/operators) and fv1 is set
+			const groupable = fk1 && fv1 !== null && fv1 !== undefined
+				&& fv1 !== "" && !/\s/.test(fk1);
+
+			if (!groupable) { solo_orig.push(i); continue; }
+
+			const sig = [
+				q.aggr_type || "sum",
+				q.doctype   || "",
+				q.fieldname || "name",
+				fk1,
+				q.fk2 || "", String(q.fv2 ?? ""),
+				q.fk3 || "", String(q.fv3 ?? ""),
+				q.fk4 || "", String(q.fv4 ?? ""),
+			].join("\x00");
+
+			if (!group_map.has(sig)) {
+				group_map.set(sig, {
+					payload: {
+						aggr_type: q.aggr_type || "sum",
+						doctype:   q.doctype,
+						fieldname: q.fieldname || "name",
+						fk1,
+						fv1_list:  [],
+						...(q.fk2 && { fk2: q.fk2, fv2: q.fv2 }),
+						...(q.fk3 && { fk3: q.fk3, fv3: q.fv3 }),
+						...(q.fk4 && { fk4: q.fk4, fv4: q.fv4 }),
+					},
+					orig_indices: [],
+				});
+			}
+			const g = group_map.get(sig);
+			g.payload.fv1_list.push(String(fv1));
+			g.orig_indices.push(i);
+		}
+
+		const groups  = [...group_map.values()];
+		const compact = [
+			...groups.map(g => g.payload),
+			...solo_orig.map(i => queries[i]),
+		];
+
 		Promise.resolve(
 			frappe.call({
 				method: "excel_view.api.frappe_aggregate_batch",
-				args:   { queries: JSON.stringify(queries) },
+				args:   { queries: JSON.stringify(compact) },
 			}),
 		)
 			.then((r) => {
 				const results = r.message?.results ?? [];
 				const ts = Date.now();
-				keys.forEach((key, i) => {
-					const val = results[i];
-					this._cache.set(key, {
-						status: "ok",
-						data:   val ?? 0,
-						ts,
+
+				// Grouped: results[g_idx] is an array parallel to fv1_list
+				groups.forEach((g, g_idx) => {
+					const arr = results[g_idx];
+					g.orig_indices.forEach((orig_i, j) => {
+						const val = Array.isArray(arr) ? arr[j] : (arr ?? 0);
+						this._cache.set(keys[orig_i], { status: "ok", data: val ?? 0, ts });
 					});
+				});
+
+				// Solo: results[groups.length + j] is a scalar
+				solo_orig.forEach((orig_i, j) => {
+					const val = results[groups.length + j];
+					this._cache.set(keys[orig_i], { status: "ok", data: val ?? 0, ts });
 				});
 			})
 			.catch((err) => {

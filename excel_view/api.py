@@ -601,6 +601,104 @@ def _invalidate_agg_cache_for_doctype(doc, method=None) -> None:
 	frappe.cache().delete_keys("ev_agg_batch:*")
 
 
+def _exec_pregroup(q: dict) -> list:
+    """
+    Execute a pre-grouped aggregate query (client sent fv1_list format) as a
+    single SQL IN-query.  Returns a list of values parallel to q["fv1_list"].
+
+    This is called when the client has already done the grouping step and sent
+    {aggr_type, doctype, fieldname, fk1, fv1_list:[...], fk2-fk4 static filters}.
+    The server runs one GROUP BY query and maps results back to the input order.
+    """
+    aggr_type = (q.get("aggr_type") or "sum").lower()
+    doctype   = str(q.get("doctype") or "")
+    fieldname = str(q.get("fieldname") or "name")
+    fk1       = str(q.get("fk1") or "")
+    fv1_list  = [str(v) for v in (q.get("fv1_list") or [])]
+
+    if not doctype or not fk1 or not fv1_list:
+        return []
+
+    try:
+        frappe.has_permission(doctype, "read", throw=True)
+    except frappe.PermissionError:
+        return ["#PERM_DENIED"] * len(fv1_list)
+
+    try:
+        if aggr_type not in ("count", "get"):
+            _validate_fieldname(doctype, fieldname)
+        if aggr_type != "get":
+            _validate_fieldname(doctype, fk1)
+        else:
+            _validate_fieldname(doctype, fieldname)
+    except Exception:
+        return ["#ARG!"] * len(fv1_list)
+
+    # ── Static tail-filters (fk2-fk4) ────────────────────────────────────────
+    extra_sql    = ""
+    extra_params: list = []
+    for fk, fv in (
+        (q.get("fk2") or "", q.get("fv2")),
+        (q.get("fk3") or "", q.get("fv3")),
+        (q.get("fk4") or "", q.get("fv4")),
+    ):
+        if not fk or fv is None or fv == "":
+            continue
+        parts = fk.rsplit(" ", 1)
+        if len(parts) == 2 and parts[1].lower() in _FILTER_OPS:
+            field, op = parts[0].strip(), parts[1].strip()
+        else:
+            field, op = fk.strip(), "="
+        try:
+            _validate_fieldname(doctype, field)
+        except Exception:
+            continue
+        extra_sql    += f" AND `{field}` {op} %s"
+        extra_params.append(fv)
+
+    placeholders = ", ".join(["%s"] * len(fv1_list))
+
+    # ── "get" path ────────────────────────────────────────────────────────────
+    if aggr_type == "get":
+        sql = (
+            f"SELECT `name`, `{fieldname}`"
+            f" FROM `tab{doctype}`"
+            f" WHERE `name` IN ({placeholders})"
+        )
+        try:
+            rows    = frappe.db.sql(sql, fv1_list, as_dict=False)
+            agg_map = {str(r[0]): r[1] for r in rows}
+        except Exception:
+            return [""] * len(fv1_list)
+        return [agg_map.get(fv1, "") for fv1 in fv1_list]
+
+    # ── Aggregate path ────────────────────────────────────────────────────────
+    if aggr_type == "sum":
+        agg_expr, default = f"SUM(`{fieldname}`)", 0
+    elif aggr_type == "avg":
+        agg_expr, default = f"AVG(`{fieldname}`)", 0
+    elif aggr_type == "max":
+        agg_expr, default = f"MAX(`{fieldname}`)", ""
+    elif aggr_type == "min":
+        agg_expr, default = f"MIN(`{fieldname}`)", ""
+    else:  # count
+        agg_expr, default = "COUNT(*)", 0
+
+    sql = (
+        f"SELECT `{fk1}`, {agg_expr}"
+        f" FROM `tab{doctype}`"
+        f" WHERE `{fk1}` IN ({placeholders}){extra_sql}"
+        f" GROUP BY `{fk1}`"
+    )
+    try:
+        rows    = frappe.db.sql(sql, fv1_list + extra_params, as_dict=False)
+        agg_map = {str(r[0]): r[1] for r in rows}
+    except Exception:
+        return [default] * len(fv1_list)
+
+    return [agg_map.get(fv1, default) for fv1 in fv1_list]
+
+
 @frappe.whitelist()
 def frappe_aggregate_batch(queries: str) -> dict:
 	"""
@@ -641,6 +739,14 @@ def frappe_aggregate_batch(queries: str) -> dict:
 	solo:   list = []   # [(index, query_dict), ...] — cannot be batched
 
 	for i, q in enumerate(qs):
+		# ── Pre-grouped compact format (client sent fv1_list) ─────────────────
+		# Client has already grouped by signature; results[i] is an array
+		# parallel to fv1_list (not a scalar) so the client can reconstruct
+		# each cell's cache entry without re-grouping on the server.
+		if isinstance(q.get("fv1_list"), list):
+			results[i] = _exec_pregroup(q)
+			continue
+
 		aggr_type = (q.get("aggr_type") or "sum").lower()
 		doctype   = str(q.get("doctype") or "")
 		fieldname = str(q.get("fieldname") or "name")
