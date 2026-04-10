@@ -979,7 +979,10 @@ frappe.views.excel.PermissionPanel = class PermissionPanel {
 
 	/**
 	 * Render module checklist for selected module profile.
-	 * Checked = module is BLOCKED (hidden) for users with this profile.
+	 * Convention matches Frappe's native Module Profile form:
+	 *   Checked   = module is VISIBLE (allowed) for users with this profile.
+	 *   Unchecked = module is BLOCKED (hidden).
+	 * Internally we still store the blocked Set; we just flip the checkbox.
 	 */
 	_render_mp_checklist(search) {
 		const el = this.$panel[0].querySelector("#ev-mp-checklist");
@@ -995,16 +998,17 @@ frappe.views.excel.PermissionPanel = class PermissionPanel {
 		for (const mod of all) {
 			if (q && !mod.toLowerCase().includes(q)) continue;
 			count++;
-			const blocked = profile.blocked.has(mod);
+			// visible = NOT in the blocked set; checkbox checked = visible
+			const visible = !profile.blocked.has(mod);
 			const div = document.createElement("div");
-			div.className = "ev-prof-check-item" + (blocked ? " ev-prof-chk-blocked" : "");
+			div.className = "ev-prof-check-item" + (!visible ? " ev-prof-chk-blocked" : "");
 			const esc = frappe.utils.escape_html(mod);
 			div.innerHTML =
 				`<label class="ev-prof-chk-label">` +
 				`<input type="checkbox" class="ev-mp-chk"` +
-				` data-mod="${esc}"${blocked ? " checked" : ""}>` +
+				` data-mod="${esc}"${visible ? " checked" : ""}>` +
 				`<span>${esc}</span>` +
-				(blocked ? `<span class="ev-prof-blocked-tag">${__("hidden")}</span>` : "") +
+				(!visible ? `<span class="ev-prof-blocked-tag">${__("hidden")}</span>` : "") +
 				`</label>`;
 			frag.appendChild(div);
 		}
@@ -1038,21 +1042,23 @@ frappe.views.excel.PermissionPanel = class PermissionPanel {
 		if (!this._sel_mp) return;
 		const profile = this._mp_data.get(this._sel_mp);
 		if (!profile) return;
-		if (checked) profile.blocked.add(mod);
-		else          profile.blocked.delete(mod);
+		// checked = visible (matches Frappe convention); blocked = hidden
+		if (checked) profile.blocked.delete(mod);
+		else          profile.blocked.add(mod);
 		// Re-render the changed item to toggle the "hidden" tag
 		const el = this.$panel[0].querySelector(`.ev-mp-chk[data-mod="${CSS.escape(mod)}"]`);
 		if (el) {
 			const item = el.closest(".ev-prof-check-item");
 			if (item) {
-				item.classList.toggle("ev-prof-chk-blocked", checked);
+				const nowBlocked = !checked;
+				item.classList.toggle("ev-prof-chk-blocked", nowBlocked);
 				const tag = item.querySelector(".ev-prof-blocked-tag");
-				if (checked && !tag) {
+				if (nowBlocked && !tag) {
 					const span = document.createElement("span");
 					span.className = "ev-prof-blocked-tag";
 					span.textContent = __("hidden");
 					el.closest("label").appendChild(span);
-				} else if (!checked && tag) {
+				} else if (!nowBlocked && tag) {
 					tag.remove();
 				}
 			}

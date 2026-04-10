@@ -6227,7 +6227,6 @@ def get_access_profiles():
 			"Has Role",
 			filters={"parenttype": "Role Profile"},
 			fields=["parent", "role"],
-			order_by="None",
 		):
 			rp_role_map.setdefault(r.parent, []).append(r.role)
 	else:
@@ -6262,7 +6261,6 @@ def get_access_profiles():
 			"Block Module",
 			filters={"parenttype": "Module Profile"},
 			fields=["parent", "module"],
-			order_by="None",
 		):
 			mp_mod_map.setdefault(r.parent, []).append(r.module)
 	else:
