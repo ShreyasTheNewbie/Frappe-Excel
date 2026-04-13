@@ -293,9 +293,6 @@ frappe.views.excel.ExcelToolbar = class ExcelToolbar {
 						<button class="ev-tb-btn ev-columns-btn" data-ev-tip="${__("Choose Columns")}">
 							<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="1" width="4" height="14" rx="1"/><rect x="6" y="1" width="4" height="14" rx="1"/><rect x="11" y="1" width="4" height="14" rx="1"/></svg>
 						</button>
-						<button class="ev-tb-btn ev-join-btn" data-ev-tip="${__("Link Sheets")}">
-							<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="3" cy="8" r="2.2"/><circle cx="13" cy="3.5" r="2.2"/><circle cx="13" cy="12.5" r="2.2"/><line x1="5.1" y1="7.1" x2="10.9" y2="4.3"/><line x1="5.1" y1="8.9" x2="10.9" y2="11.7"/></svg>
-						</button>
 						<div class="ev-tb-sep"></div>
 						<!-- Period picker — compact pill with dynamic label -->
 						<div class="ev-period-wrap">
@@ -479,7 +476,6 @@ frappe.views.excel.ExcelToolbar = class ExcelToolbar {
 
 		// ── Quick Access actions ────────────────────────────────────────────
 		$w.on("click", ".ev-columns-btn", () => this.board.open_field_picker());
-		$w.on("click.ev-toolbar", ".ev-join-btn", () => this.board._open_join_canvas());
 
 		// ── Period picker ───────────────────────────────────────────────────
 		// Use position:fixed so the dropdown escapes ev-toolbar's overflow:auto clip.

@@ -65,13 +65,6 @@ frappe.views.excel.WorkbookManager = class WorkbookManager {
 			}, 0);
 		}
 
-		// Re-open the join canvas if it was open when the page was refreshed.
-		// Deferred by a slightly longer tick so the board + workbook restore settle first.
-		if (settings.excel_join_canvas_open) {
-			setTimeout(() => {
-				this.board._open_join_canvas();
-			}, 50);
-		}
 	}
 
 	// ── Toolbar event binding ─────────────────────────────────────────────────
@@ -156,8 +149,7 @@ frappe.views.excel.WorkbookManager = class WorkbookManager {
 	}
 
 	/**
-	 * Save the current grid state (including any active join config) under a
-	 * given title, without prompting.  Called by JoinCanvas after Apply.
+	 * Save the current grid state under a given title, without prompting.
 	 *
 	 * @param {string}  title     - name shown in the Views list
 	 * @param {number}  is_public - 1 = shared with everyone, 0 = private
@@ -486,12 +478,6 @@ frappe.views.excel.WorkbookManager = class WorkbookManager {
 			order: board.list_view.sort_order || "desc",
 		};
 
-		// ── join_config ────────────────────────────────────────────────
-		// Include the last applied IntelliFlow join config if one exists.
-		// board._last_join_config is set by _apply_join_result() and persists
-		// until the board is destroyed or a new workbook deselected.
-		const join_config = this.board._last_join_config || null;
-
 		// ── sheets (V2.5) ──────────────────────────────────────────────
 		// Save current base-sheet columns into sheet_manager before serializing
 		const sm = this.board.sheet_manager;
@@ -533,7 +519,7 @@ frappe.views.excel.WorkbookManager = class WorkbookManager {
 		const hide_gridlines = this.board.$hot_container?.hasClass("ev-hide-gridlines") || false;
 
 		const smart_lookups = board._applied_lookups?.length ? board._applied_lookups : null;
-		return { columns_config: root_columns_config, formula_columns, blank_columns, filters, sort_by, join_config, sheets, chart_overlays, format_store, cond_fmt_rules, freeze_cols, freeze_rows, hide_gridlines, smart_lookups };
+		return { columns_config: root_columns_config, formula_columns, blank_columns, filters, sort_by, sheets, chart_overlays, format_store, cond_fmt_rules, freeze_cols, freeze_rows, hide_gridlines, smart_lookups };
 	}
 
 	// ── Restore state from config ─────────────────────────────────────────────
@@ -668,13 +654,6 @@ frappe.views.excel.WorkbookManager = class WorkbookManager {
 		// If the user just cleared filters (identical args), the refresh is
 		// silently skipped.  Nulling last_args forces a fresh fetch every time
 		// a workbook is loaded.
-
-		// If this workbook has a join config, schedule re-apply after the next
-		// board.refresh() call (which fires when the server returns data).
-		// _pending_join_config is consumed by ExcelBoard.refresh() exactly once.
-		if (config.join_config?.edges?.length) {
-			board._pending_join_config = config.join_config;
-		}
 
 		board.list_view.last_args = null;
 		board.list_view.start = 0;

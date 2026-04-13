@@ -91,7 +91,6 @@ import "./components/workbook_manager.js";  // V2.1 — Saved Workbooks
 import "./components/status_bar.js";        // V2.2 — Status Bar
 // V2.4 — IntelliFlow Join Canvas + Collaboration (Phase 3) - Now using vanilla JS
 import "./components/query_flow_panel.js";  // V3 — QueryFlowPanel (IntelliFlow V3)
-import "./components/join_canvas.js";       // V2.4 — IntelliFlow Join Canvas
 import "./components/sheet_manager.js";    // V2.5 — Multi-Sheet Workbooks
 import "./components/cf_manager.js";      // V2.6 — Conditional Formatting
 import "./components/chart_manager.js";   // V2.6 — Insert Charts

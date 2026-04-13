@@ -1,30 +1,13 @@
-# ── V2 IntelliFlow / GenBI — AI Join Discovery + Pattern Mining ────────────────
-# networkx: graph traversal for schema path-finding and join discovery
-networkx>=3.0
-# mlxtend: association rule mining (frequent itemsets) for Pattern Mining
-mlxtend>=0.23
-# scikit-learn: TF-IDF vectorizer for semantic column name similarity
-scikit-learn>=1.3
-scipy>=1.11
-numpy>=1.24
-pandas>=2.0
-# RapidFuzz: fast fuzzy string matching for column name matching (Layer 2 of Smart Lookup)
+# ── Smart Lookup — fuzzy column name matching (Layer 2) ─────────────────────
+# RapidFuzz: token_sort_ratio / ratio for src↔tgt column name similarity
 RapidFuzz>=3.0
-# spaCy: NER for PROMPT() formula (V3.5 roadmap) — model below auto-installs
-spacy>=3.7
-# spaCy English model - auto-installs without manual download
-https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl
-# sentence-transformers: semantic embedding for advanced GenBI join suggestions
-sentence-transformers>=2.2
-# pdfplumber: PDF export parsing (V2.5+)
+
+# ── PDF import ───────────────────────────────────────────────────────────────
+# pdfplumber: parse PDF tables for import (V2.5+)
 pdfplumber>=0.10
 
-# ── V3 IntelliFlow — QueryFlowPanel / DuckDB engine V2 ─────────────────────────
-# QueryFlowPanel, SQLGenerator, DAG flowchart are entirely client-side JS.
-# Client-side packages (dagre, sql-formatter, comlink, duckdb-wasm) are in package.json.
-#
-# ── V3.4 Arrow IPC Transport — bulk_fetch_for_duckdb ───────────────────────────
-# pyarrow: serialize DocType rows as Arrow IPC binary stream in bulk_fetch_for_duckdb.
-# 3-5x smaller payload vs JSON, zero CSV re-encoding, native DuckDB Arrow reader.
-# Fallback to JSON rows if pyarrow unavailable (backward-compatible).
+# ── DuckDB Arrow IPC transport ───────────────────────────────────────────────
+# pyarrow: serialize DocType rows as Arrow IPC binary for bulk_fetch_for_duckdb.
+# 3-5x smaller than JSON; native DuckDB Arrow reader on client.
+# Falls back to JSON rows if unavailable (backward-compatible).
 pyarrow>=14.0

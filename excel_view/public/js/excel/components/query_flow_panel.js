@@ -45,7 +45,7 @@ frappe.views.excel.QueryFlowPanel = class QueryFlowPanel {
 	/** @param {Object} opts */
 	constructor(opts) {
 		this.ast = opts.ast;                 // QueryAST instance
-		this.canvas = opts.canvas;           // JoinCanvas instance (for schema info)
+		this.canvas = opts.canvas;           // canvas opts (for schema info)
 		this.on_ast_change = opts.on_ast_change || (() => {});  // callback when AST mutates
 		this.$container = null;
 		this._active_step = null;
