@@ -83,6 +83,7 @@ import "./cell_types/index.js";
 
 import "./components/context_menu.js";
 import "./components/data_manager.js";
+import "./components/child_table_manager.js"; // V3.5 — Inline child table expand
 import "./components/column_manager.js";
 import "./components/formula_bar.js";
 import "./components/toolbar.js";

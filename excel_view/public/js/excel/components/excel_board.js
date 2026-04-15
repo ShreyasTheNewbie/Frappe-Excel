@@ -117,10 +117,12 @@ frappe.views.ExcelBoard = class ExcelBoard {
 		this.workbook_manager = new frappe.views.excel.WorkbookManager({ board: this });
 
 		// V2.6 — Chart / CF / Pivot managers (toolbar delegates to these)
-		this.cf_manager       = new frappe.views.excel.CFManager({ board: this });
-		this.chart_manager    = new frappe.views.excel.ChartManager({ board: this });
-		this.pivot_builder    = new frappe.views.excel.PivotBuilder({ board: this });
-		this.dashboard_manager = new frappe.views.excel.DashboardManager({ board: this });
+		this.cf_manager           = new frappe.views.excel.CFManager({ board: this });
+		this.chart_manager        = new frappe.views.excel.ChartManager({ board: this });
+		this.pivot_builder        = new frappe.views.excel.PivotBuilder({ board: this });
+		this.dashboard_manager    = new frappe.views.excel.DashboardManager({ board: this });
+		// V3.5 — Inline child table expansion
+		this.child_table_manager  = new frappe.views.excel.ChildTableManager({ board: this });
 
 		// 2. Load persisted freeze state (needed before _init_hot)
 		this._frozen_cols = this.column_manager.load_freeze();
@@ -147,6 +149,8 @@ frappe.views.ExcelBoard = class ExcelBoard {
 		this._inject_meta_column();
 		// Inject combined social column (Tags/Comments/Assign/Liked/Status/Idx) if present
 		this._inject_social_column();
+		// V3.5 — Prepend expand toggle column when doctype has child tables
+		this._inject_ct_expand_column();
 		// V3.3 — Apply persisted column order (drag-reorder)
 		this._apply_saved_col_order();
 		// Snapshot the physical column order HOT will be initialized with.
@@ -332,7 +336,9 @@ frappe.views.ExcelBoard = class ExcelBoard {
 		// $grid_main — flex-col: HOT + status bar stack vertically, flex:1 in $grid_area.
 		this.$grid_main = $('<div class="ev-grid-main">').appendTo(this.$grid_area);
 
-		this.$hot_container = $('<div class="ev-hot-container">').appendTo(this.$grid_main);
+		// position:relative is required so the child-table panel (position:absolute)
+		// is positioned relative to this container, not the viewport.
+		this.$hot_container = $('<div class="ev-hot-container" style="position:relative">').appendTo(this.$grid_main);
 
 		// Dashboard canvas — shown when a Dashboard sheet is active, hidden otherwise
 		this.$dashboard_canvas = $('<div class="ev-dashboard-canvas">').appendTo(this.$grid_main);
@@ -360,6 +366,13 @@ frappe.views.ExcelBoard = class ExcelBoard {
 
 		// Social column CRUD: delegated click handler on hot container
 		this._bind_social_clicks();
+
+		// V3.5 — Child table expand toggle: delegated on hot container
+		this.$hot_container.on("click.ev-ct-expand", ".ev-ct-toggle-btn", (e) => {
+			e.stopPropagation();
+			const row_idx = parseInt($(e.currentTarget).data("row"), 10);
+			if (!isNaN(row_idx)) this.child_table_manager?.toggle(row_idx);
+		});
 	}
 
 	_init_hot() {
@@ -376,9 +389,12 @@ frappe.views.ExcelBoard = class ExcelBoard {
 			manualColumnResize: true,
 			manualColumnMove: true,
 			manualRowResize: true,
-			// V3.1 — rowHeights: 0 for hidden rows, 42px when meta col present, else 23px
+			// V3.1 — rowHeights: 0 for hidden rows, dynamic for CT spacer, else 23/42px
 			rowHeights: (row) => {
 				if (this._hidden_rows?.has(row)) return 0;
+				// V3.5 — CT spacer row: height = panel height so rows below are pushed down
+				const spacer_h = this.child_table_manager?.spacer_height_for_row(row);
+				if (spacer_h != null) return spacer_h;
 				return this.columns?.some(c => c._is_meta_col || c._is_social_col) ? 42 : 23;
 			},
 			columnSorting: true,
@@ -421,9 +437,18 @@ frappe.views.ExcelBoard = class ExcelBoard {
 
 			// Cell-level meta (readOnly, className)
 			cells: (row, col) => {
+				// V3.5 — Spacer rows are entirely read-only and visually invisible
+				const d = this.list_view?.data?.[row];
+				if (d?._is_ct_spacer) {
+					return { readOnly: true, className: "ev-ct-spacer-td" };
+				}
+				// Expand toggle column — always read-only across all rows
+				if (this.columns[col]?._is_ct_expand_col) {
+					return { readOnly: true, className: "ev-ct-expand-td" };
+				}
+
 				const meta = this.data_manager.get_cell_meta(row, col);
 				// V2.5 AI Analysis: anomaly + cluster row coloring
-				const d = this.list_view?.data?.[row];
 				if (d) {
 					if (d._is_anomaly) {
 						meta.className = ((meta.className || "") + " ev-anomaly-row").trim();
@@ -576,8 +601,19 @@ frappe.views.ExcelBoard = class ExcelBoard {
 	 *  - Field label below (bold)
 	 */
 	_col_header_html(col) {
-		const letter = this._col_idx_to_letter(col);
 		const col_cfg = this.columns[col];
+		// V3.5 — Expand toggle column: render a grid/table icon instead of "A"
+		if (col_cfg?._is_ct_expand_col) {
+			return `<div class="ev-col-header ev-col-header--expand" title="${__("Child tables")}">
+				<svg class="ev-ct-hdr-icon" width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+					<rect x="1" y="1" width="6" height="6" rx="1" opacity=".7"/>
+					<rect x="9" y="1" width="6" height="6" rx="1" opacity=".4"/>
+					<rect x="1" y="9" width="6" height="6" rx="1" opacity=".4"/>
+					<rect x="9" y="9" width="6" height="6" rx="1" opacity=".4"/>
+				</svg>
+			</div>`;
+		}
+		const letter = this._col_idx_to_letter(col);
 		const name = frappe.utils.escape_html(col_cfg?.title || letter);
 		const ct_badge = col_cfg?._is_ct_col
 			? `<span class="ev-col-ct-badge">CT</span>` : "";
@@ -605,6 +641,50 @@ frappe.views.ExcelBoard = class ExcelBoard {
 	 * Called by HOT's afterRenderer hook after each cell is drawn.
 	 */
 	_apply_cell_format(TD, row, col, value) {
+		// V3.5 — Expand toggle column: render ▶/▼ chevron; spacer rows are invisible
+		if (this.columns[col]?._is_ct_expand_col) {
+			const d = this.list_view?.data?.[row];
+			if (d?._is_ct_spacer) {
+				// Spacer: entirely blank, takes only vertical space
+				TD.innerHTML = "";
+				TD.className = "ev-ct-spacer-td";
+				TD.style.background = "transparent";
+				TD.style.border = "none";
+				TD.style.padding = "0";
+				return;
+			}
+			if (d && !d._is_new && !d._is_ct_spacer && this.child_table_manager?.has_child_tables()) {
+				const is_open = this.child_table_manager?._state?.parent_row_idx === row;
+				TD.innerHTML = `
+					<button class="ev-ct-toggle-btn${is_open ? " ev-ct-toggle-btn--open" : ""}"
+						data-row="${row}"
+						title="${frappe.utils.escape_html(is_open ? __("Collapse child table") : __("Expand child table"))}"
+						aria-expanded="${is_open}"
+						aria-label="${frappe.utils.escape_html(__("Toggle child tables"))}"
+					>
+						<svg class="ev-ct-chevron" width="9" height="9" viewBox="0 0 16 16" fill="currentColor">
+							<path fill-rule="evenodd" d="M4.646 1.646a.5.5 0 0 1 .708 0l6 6a.5.5 0 0 1 0 .708l-6 6a.5.5 0 0 1-.708-.708L10.293 8 4.646 2.354a.5.5 0 0 1 0-.708z"/>
+						</svg>
+					</button>`;
+				TD.className = "ev-ct-expand-td";
+				TD.style.padding = "0";
+				TD.style.textAlign = "center";
+				TD.style.verticalAlign = "middle";
+			} else {
+				TD.innerHTML = "";
+				TD.className = "ev-ct-expand-td";
+			}
+			return;
+		}
+
+		// Spacer row: all non-expand cells are blank/invisible
+		if (this.list_view?.data?.[row]?._is_ct_spacer) {
+			TD.innerHTML = "";
+			TD.className = "ev-ct-spacer-td";
+			TD.style.cssText = "background:transparent;border:none;padding:0;";
+			return;
+		}
+
 		// Join skeleton: shimmer animation while join data is loading
 		if (this.columns[col]?._is_join_loading) {
 			TD.classList.add("ev-cell-join-loading");
@@ -1354,6 +1434,40 @@ frappe.views.ExcelBoard = class ExcelBoard {
 
 		SOCIAL_FIELDS.forEach(f => this._hidden_col_keys.add(f));
 		this.columns = this._master_columns.filter(c => !this._hidden_col_keys.has(c.data)); this._col_index_map = null;
+	}
+
+	// ── V3.5 — Child Table expand column ─────────────────────────────────────
+
+	/**
+	 * Prepend a narrow (24px) expand-toggle column when the board's DocType
+	 * has at least one child table field.  The column is always the first data
+	 * column (index 0) so its position is stable regardless of field picker state.
+	 *
+	 * The chevron SVG is rendered via afterRenderer; clicks are handled by the
+	 * delegated handler bound in _init_container().
+	 */
+	_inject_ct_expand_column() {
+		if (!this.child_table_manager?.has_child_tables()) return;
+		// Guard: don't inject twice (workbook apply_config may call _inject_* again)
+		if (this._master_columns.some(c => c._is_ct_expand_col)) return;
+
+		const col = {
+			data:              "_ct_expand",
+			title:             "",
+			readOnly:          true,
+			_readonly:         true,
+			_is_ct_expand_col: true,
+			width:             24,
+			// Disable header menu / sorting for this column
+			dropdownMenu:      false,
+			columnSorting:     { sortEmptyCells: false, headerAction: false },
+			disableVisualSelection: true,
+		};
+
+		// Prepend — always at index 0 so toPhysicalColumn maps are unaffected
+		this._master_columns.unshift(col);
+		this.columns = this._master_columns.filter(c => !this._hidden_col_keys.has(c.data));
+		this._col_index_map = null;
 	}
 
 	/**
@@ -4039,6 +4153,8 @@ frappe.views.ExcelBoard = class ExcelBoard {
 		// Re-group meta fields into virtual _meta column if present
 		this._inject_meta_column();
 		this._inject_social_column();
+		// V3.5 — Re-inject child table expand toggle column
+		this._inject_ct_expand_column();
 		// Re-inject base-sheet Smart Lookup columns into _master_columns after column rebuild.
 		// Non-base lookups (src_sheet_id set) live in their own sheet's columns_config — skip here.
 		if (this._applied_lookups?.length) {
@@ -4359,6 +4475,10 @@ frappe.views.ExcelBoard = class ExcelBoard {
 			const to   = new_data.length - 1;
 			if (to >= from) requestAnimationFrame(() => this._reapply_blank_col_fills(from, to));
 		}
+
+		// V3.5 — Collapse any open child table panel before new data arrives.
+		// The panel references row indices that will be invalid after loadData().
+		this.child_table_manager?.collapse_silent();
 
 		// CT columns — re-enrich on every data refresh (idle refresh wipes values)
 		if (this._ct_fieldnames?.length && new_data?.length) {
@@ -5200,6 +5320,7 @@ frappe.views.ExcelBoard = class ExcelBoard {
 	destroy() {
 		this._destroyed = true;
 		$(document).off("keydown.ev");
+		this.$hot_container?.off("click.ev-ct-expand");
 		this._resize_observer?.disconnect();
 		// Remove formula-cache realtime listener
 		if (this._formula_realtime_handler) {
@@ -5219,6 +5340,7 @@ frappe.views.ExcelBoard = class ExcelBoard {
 		this.workbook_manager?.destroy();
 		this.sheet_manager?.destroy();
 		this.dashboard_manager?.destroy();
+		this.child_table_manager?.destroy();
 		// Exit bulk-add mode cleanly (removes pending rows + hooks)
 		if (this._bulk_add_start >= 0) this._exit_bulk_add_mode();
 		this.hot?.destroy();

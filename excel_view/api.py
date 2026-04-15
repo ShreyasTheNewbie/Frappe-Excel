@@ -29,6 +29,21 @@ import frappe
 from frappe import _
 from excel_view.decorators import excel_whitelist
 
+# orjson: 5-10x faster JSON parsing/serialization than stdlib json.
+# Used for all our heavy payload parsing (bulk_fetch, smart_lookup, etc.)
+try:
+    import orjson as _json_lib
+    def _fast_parse(s):
+        if isinstance(s, (bytes, bytearray)):
+            return _json_lib.loads(s)
+        return _json_lib.loads(s.encode() if isinstance(s, str) else s)
+    def _fast_dumps(obj):
+        return _json_lib.dumps(obj).decode()
+except ImportError:
+    import json as _json_lib
+    _fast_parse = _json_lib.loads
+    _fast_dumps = _json_lib.dumps
+
 
 def _check_doctype_permission(doctype, ptype="read"):
 	"""Check permission, skipping child table DocTypes (they inherit from parent)."""
@@ -115,6 +130,456 @@ def _parse_filter_pairs(
     return filters
 
 
+# ── Child Table — Inline Expand (V3.5) ───────────────────────────────────────
+#
+# Error-handling philosophy:
+#   Endpoints return {"_ev_error": True, "message": "...", "exc_type": "..."} on
+#   failure instead of raising.  This bypasses Frappe's request-level error handler
+#   so _server_messages never reach the browser — all error display is handled by
+#   the JS EVModal/toast system.
+
+def _make_ev_error(exc: Exception) -> dict:
+    """
+    Serialise *exc* into the structured error dict that the front-end
+    _ev_call() helper recognises and routes through EVModal.
+
+    Priority for the user-facing message:
+      1. frappe.message_log  — populated by frappe.throw(); contains the
+         translated, HTML-formatted message that Frappe normally shows in its
+         own dialog.  We strip the HTML and use the plain text.
+      2. str(exc)            — raw Python exception message; acceptable but
+         may contain internal identifiers (e.g. MandatoryError format).
+
+    IMPORTANT: call this *before* frappe.message_log.clear() so the log is
+    still populated.
+    """
+    exc_type = type(exc).__name__.split(".")[-1]
+
+    msg: str | None = None
+
+    # 1 — user-friendly message from frappe.message_log
+    if frappe.message_log:
+        try:
+            entry = frappe.message_log[-1]
+            if isinstance(entry, dict):
+                msg = entry.get("message") or entry.get("title")
+            else:
+                parsed = (_fast_parse(entry) if isinstance(entry, str) else (entry or [])) or {}
+                msg = parsed.get("message") or parsed.get("title")
+        except Exception:
+            pass
+
+    # 2 — fallback to exception string
+    if not msg:
+        msg = str(exc) if exc else frappe._("An unexpected error occurred.")
+
+    return {
+        "_ev_error": True,
+        "message":  frappe.utils.strip_html(msg),
+        "exc_type": exc_type,
+    }
+
+
+#
+# Four endpoints that power the "expand parent row → inline child grid" feature.
+# All writes go through the parent doc.save() so every controller, validate,
+# before_save and after_save hook runs exactly as it would from the Frappe form.
+#
+# Security model:
+#   - READ  endpoints: caller must have READ on the parent DocType.
+#   - WRITE endpoints: caller must have WRITE on the parent DocType.
+#   - Child tables (istable=1) inherit perms from their parent; no separate
+#     permission row is required on the child DocType itself.
+#   - All fieldnames are validated against live meta — no raw SQL injection.
+
+#: Field types that carry no storable value (sections, columns, HTML, etc.)
+_NO_VALUE_TYPES: frozenset[str] = frozenset({
+    "Section Break", "Column Break", "Tab Break", "HTML", "Fold", "Heading",
+    "Button", "Image", "Barcode", "Geolocation", "Table", "Table MultiSelect",
+})
+
+
+def _get_child_table_df(parent_meta, child_fieldname: str):
+    """
+    Return the field descriptor for *child_fieldname* on *parent_meta*.
+    Raises ValidationError if the field does not exist or is not a Table type.
+    """
+    df = next(
+        (f for f in parent_meta.fields
+         if f.fieldname == child_fieldname and f.fieldtype in ("Table", "Table MultiSelect")),
+        None,
+    )
+    if not df:
+        frappe.throw(
+            _("'{0}' is not a valid child table field on {1}.").format(
+                child_fieldname, parent_meta.name
+            )
+        )
+    return df
+
+
+def _child_col_defs(child_meta) -> list[dict]:
+    """
+    Return a JSON-serialisable list of column definitions for the child DocType.
+    Only includes fields with a storable value (excludes Section Break etc.).
+    The 'name' system field is prepended so each row has a stable identifier.
+    `allow_on_submit` mirrors Frappe's perm.js logic: tells the UI whether this
+    field may be edited on an already-submitted parent document.
+    """
+    cols = []
+    for f in child_meta.fields:
+        if f.fieldtype in _NO_VALUE_TYPES:
+            continue
+        cols.append({
+            "fieldname":      f.fieldname,
+            "label":          _(f.label or f.fieldname),
+            "fieldtype":      f.fieldtype,
+            "options":        f.options or "",
+            "reqd":           bool(f.reqd),
+            "read_only":      bool(f.read_only),
+            "hidden":         bool(f.hidden),
+            "in_list_view":   bool(f.in_list_view),
+            "default":        f.default or "",
+            "allow_on_submit": bool(f.allow_on_submit),  # V3.5: submitted-doc edit guard
+        })
+    return cols
+
+
+@frappe.whitelist()
+def get_child_rows(doctype: str, parent_name: str, child_fieldname: str) -> dict:
+    """
+    Return all rows of one child table for a single parent document.
+
+    Args:
+        doctype:         Parent DocType (e.g. "Sales Order")
+        parent_name:     Name of the parent document (e.g. "SAL-ORD-2026-00001")
+        child_fieldname: Fieldname of the child table on the parent (e.g. "items")
+
+    Returns:
+        {
+          "child_doctype": "Sales Order Item",
+          "fields": [ { fieldname, label, fieldtype, options, reqd, ... }, ... ],
+          "rows":   [ { name, idx, fieldname: value, ... }, ... ]
+        }
+
+    Security: READ on parent DocType is required.
+    """
+    frappe.has_permission(doctype, "read", parent_name, throw=True)
+
+    parent_meta = frappe.get_meta(doctype)
+    df = _get_child_table_df(parent_meta, child_fieldname)
+    child_doctype: str = df.options
+
+    # V3.5 — Submitted-doc edit guard: fetch parent docstatus in one cheap query
+    parent_docstatus: int = frappe.db.get_value(doctype, parent_name, "docstatus") or 0
+
+    child_meta = frappe.get_meta(child_doctype)
+    col_defs = _child_col_defs(child_meta)
+
+    # Build the field list for the DB query — system fields + all value-bearing fields
+    fetch_fields = ["name", "idx"] + [c["fieldname"] for c in col_defs]
+    # Deduplicate while preserving order (name/idx might appear in col_defs too)
+    seen: set[str] = set()
+    safe_fields: list[str] = []
+    for f in fetch_fields:
+        if f not in seen:
+            seen.add(f)
+            safe_fields.append(f)
+
+    rows = frappe.get_all(
+        child_doctype,
+        filters={
+            "parent":      parent_name,
+            "parentfield": child_fieldname,
+            "parenttype":  doctype,
+        },
+        fields=safe_fields,
+        order_by="idx asc",
+        limit=0,
+    )
+
+    return {
+        "child_doctype":        child_doctype,
+        "fields":               col_defs,
+        "rows":                 [dict(r) for r in rows],
+        # V3.5 — submitted-doc awareness
+        "parent_docstatus":     parent_docstatus,
+        "table_allow_on_submit": bool(df.allow_on_submit),  # controls add/delete
+    }
+
+
+@frappe.whitelist()
+def save_child_row(
+    doctype: str,
+    parent_name: str,
+    child_fieldname: str,
+    child_name: str,
+    fields: str,
+) -> dict:
+    """
+    Update one child row via the full Frappe ORM (parent_doc.save()).
+
+    Runs all controller hooks (validate, before_save, on_change, after_save)
+    — same as saving from the Frappe form UI.
+
+    Security: WRITE on parent DocType is required.
+    """
+    try:
+        frappe.has_permission(doctype, "write", parent_name, throw=True)
+
+        fields_dict: dict = (_fast_parse(fields) if isinstance(fields, str) else fields)
+        if not fields_dict:
+            return {"name": child_name}
+
+        parent_meta = frappe.get_meta(doctype)
+        df = _get_child_table_df(parent_meta, child_fieldname)
+        child_doctype: str = df.options
+
+        child_meta = frappe.get_meta(child_doctype)
+        valid_fields = {f.fieldname for f in child_meta.fields} | _SYSTEM_FIELDS
+        for fn in fields_dict:
+            if fn not in valid_fields:
+                frappe.throw(
+                    _("Field '{0}' does not exist on {1}.").format(fn, child_doctype)
+                )
+
+        parent_doc = frappe.get_doc(doctype, parent_name)
+        target_child = next(
+            (c for c in (parent_doc.get(child_fieldname) or []) if c.name == child_name),
+            None,
+        )
+        if not target_child:
+            frappe.throw(
+                _("Child row '{0}' not found in {1}.{2}").format(
+                    child_name, parent_name, child_fieldname
+                )
+            )
+
+        for fn, val in fields_dict.items():
+            target_child.set(fn, val)
+
+        parent_doc.save()
+        frappe.db.commit()
+        return {"name": child_name}
+
+    except Exception as exc:
+        ev_err = _make_ev_error(exc)
+        frappe.message_log.clear()
+        frappe.db.rollback()
+        return ev_err
+
+
+@frappe.whitelist()
+def insert_child_row(
+    doctype: str,
+    parent_name: str,
+    child_fieldname: str,
+    fields: str,
+) -> dict:
+    """
+    Append a new child row via the full Frappe ORM (parent_doc.append + save).
+
+    Runs all controller hooks — identical to adding a row from the Frappe form UI.
+
+    Returns: { "name": new_child_name, "idx": new_idx }
+    Security: WRITE on parent DocType is required.
+    """
+    try:
+        frappe.has_permission(doctype, "write", parent_name, throw=True)
+
+        fields_dict: dict = (_fast_parse(fields) if isinstance(fields, str) else (fields or {}))
+
+        parent_meta = frappe.get_meta(doctype)
+        df = _get_child_table_df(parent_meta, child_fieldname)
+        child_doctype: str = df.options
+
+        if fields_dict:
+            child_meta = frappe.get_meta(child_doctype)
+            valid_fields = {f.fieldname for f in child_meta.fields} | _SYSTEM_FIELDS
+            for fn in fields_dict:
+                if fn not in valid_fields:
+                    frappe.throw(
+                        _("Field '{0}' does not exist on {1}.").format(fn, child_doctype)
+                    )
+
+        parent_doc = frappe.get_doc(doctype, parent_name)
+        child_row = parent_doc.append(child_fieldname, fields_dict)
+        parent_doc.save()
+        frappe.db.commit()
+        return {"name": child_row.name, "idx": child_row.idx}
+
+    except Exception as exc:
+        ev_err = _make_ev_error(exc)
+        frappe.message_log.clear()
+        frappe.db.rollback()
+        return ev_err
+
+
+@frappe.whitelist()
+def delete_child_row(
+    doctype: str,
+    parent_name: str,
+    child_fieldname: str,
+    child_name: str,
+) -> dict:
+    """
+    Remove a child row from a parent document via the full Frappe ORM.
+
+    The parent document is loaded, the matching child row is removed from the
+    in-memory list, and parent_doc.save() is called so all hooks run correctly
+    (e.g. total recalculation, on_change, after_save).
+
+    Args:
+        doctype:         Parent DocType
+        parent_name:     Name of the parent document
+        child_fieldname: Child table fieldname on the parent
+        child_name:      `name` of the child row to delete
+
+    Returns:
+        { "deleted": child_name }
+
+    Security: WRITE on parent DocType is required.
+    """
+    try:
+        frappe.has_permission(doctype, "write", parent_name, throw=True)
+
+        parent_meta = frappe.get_meta(doctype)
+        _get_child_table_df(parent_meta, child_fieldname)
+
+        parent_doc = frappe.get_doc(doctype, parent_name)
+        original_children = parent_doc.get(child_fieldname) or []
+        filtered = [c for c in original_children if c.name != child_name]
+
+        if len(filtered) == len(original_children):
+            frappe.throw(
+                _("Child row '{0}' not found in {1}.{2}").format(
+                    child_name, parent_name, child_fieldname
+                )
+            )
+
+        parent_doc.set(child_fieldname, filtered)
+        parent_doc.save()
+        frappe.db.commit()
+        return {"deleted": child_name}
+
+    except Exception as exc:
+        ev_err = _make_ev_error(exc)   # capture friendly msg BEFORE clearing log
+        frappe.message_log.clear()
+        frappe.db.rollback()
+        return ev_err
+
+
+@frappe.whitelist()
+def save_child_table_bulk(
+    doctype: str,
+    parent_name: str,
+    child_fieldname: str,
+    changes: str,
+) -> dict:
+    """
+    Save ALL pending child-table changes in a single transaction.
+
+    ``changes`` is a JSON object::
+
+        {
+          "updates": [{"name": "<child_name>", "fields": {fn: val, ...}}, ...],
+          "inserts": [{"temp_name": "_new_ct_<ts>", "fields": {fn: val, ...}}, ...]
+        }
+
+    One ``parent_doc.save()`` → one DB transaction → all ORM hooks run once.
+    Dramatically faster than N individual save calls (no N round-trips).
+
+    Returns::
+
+        {"ok": true, "inserted": [{"temp_name": "...", "name": "...", "idx": N}, ...]}
+
+    Security: WRITE on parent DocType required.
+    """
+    try:
+        frappe.has_permission(doctype, "write", parent_name, throw=True)
+
+        changes_dict: dict = (_fast_parse(changes) if isinstance(changes, str) else (changes or {}))
+        updates: list = changes_dict.get("updates") or []
+        inserts: list = changes_dict.get("inserts") or []
+        deletes: list = changes_dict.get("deletes") or []
+
+        if not updates and not inserts and not deletes:
+            return {"ok": True, "inserted": []}
+
+        parent_meta   = frappe.get_meta(doctype)
+        df            = _get_child_table_df(parent_meta, child_fieldname)
+        child_doctype = df.options
+        child_meta    = frappe.get_meta(child_doctype)
+        valid_fields  = {f.fieldname for f in child_meta.fields} | _SYSTEM_FIELDS
+
+        # Validate all field names up-front — fail fast before touching the DB
+        for upd in updates:
+            for fn in (upd.get("fields") or {}):
+                if fn not in valid_fields:
+                    frappe.throw(_("Field '{0}' does not exist on {1}.").format(fn, child_doctype))
+        for ins in inserts:
+            for fn in (ins.get("fields") or {}):
+                if fn not in valid_fields:
+                    frappe.throw(_("Field '{0}' does not exist on {1}.").format(fn, child_doctype))
+
+        parent_doc = frappe.get_doc(doctype, parent_name)
+        existing   = {c.name: c for c in (parent_doc.get(child_fieldname) or [])}
+
+        # Apply deletes — remove from the in-memory child list before save
+        # so the controller sees the final desired state (e.g. total % = 100)
+        delete_set = set(deletes)
+        if delete_set:
+            parent_doc.set(child_fieldname, [
+                row for row in (parent_doc.get(child_fieldname) or [])
+                if row.name not in delete_set
+            ])
+            existing = {c.name: c for c in (parent_doc.get(child_fieldname) or [])}
+
+        # Apply updates
+        for upd in updates:
+            child_name = upd.get("name")
+            fields_dict = upd.get("fields") or {}
+            if not child_name or not fields_dict:
+                continue
+            if child_name not in existing:
+                frappe.throw(_("Child row '{0}' not found.").format(child_name))
+            for fn, val in fields_dict.items():
+                existing[child_name].set(fn, val)
+
+        # Apply inserts
+        new_rows: list = []
+        for ins in inserts:
+            fields_dict = ins.get("fields") or {}
+            new_row = parent_doc.append(child_fieldname, fields_dict)
+            new_rows.append((ins.get("temp_name", ""), new_row))
+
+        parent_doc.save()
+
+        # For submitted docs (docstatus=1), Frappe's update_after_submit flow runs
+        # on_update_after_submit() AFTER db_update(). Any fields recalculated there
+        # (e.g. allocated_amount via calculate_contribution()) are updated in-memory
+        # but never flushed to DB. Force-persist them now.
+        if parent_doc.docstatus == 1:
+            for row in (parent_doc.get(child_fieldname) or []):
+                row.db_update()
+
+        frappe.db.commit()
+
+        return {
+            "ok": True,
+            "inserted": [
+                {"temp_name": temp_name, "name": row.name, "idx": row.idx}
+                for temp_name, row in new_rows
+            ],
+        }
+
+    except Exception as exc:
+        ev_err = _make_ev_error(exc)
+        frappe.message_log.clear()
+        frappe.db.rollback()
+        return ev_err
+
+
 # ── Child Table Data ─────────────────────────────────────────────────────────
 
 @frappe.whitelist()
@@ -135,8 +600,8 @@ def get_child_data(doctype: str, requests: str, parent_names: str) -> dict:
 	"""
 	frappe.has_permission(doctype, "read", throw=True)
 
-	reqs: dict = frappe.parse_json(requests) or {}
-	names: list = frappe.parse_json(parent_names) or []
+	reqs: dict = (_fast_parse(requests) if isinstance(requests, str) else (requests or [])) or {}
+	names: list = (_fast_parse(parent_names) if isinstance(parent_names, str) else (parent_names or [])) or []
 
 	if not reqs or not names:
 		return {}
@@ -291,7 +756,7 @@ def bulk_set_value(doctype: str, updates: str) -> dict:
     """
     frappe.has_permission(doctype, "write", throw=True)
 
-    updates_data: list[dict] = frappe.parse_json(updates)
+    updates_data: list[dict] = (_fast_parse(updates) if isinstance(updates, str) else (updates or []))
     errors: list[dict] = []
     any_saved = False
 
@@ -347,7 +812,7 @@ def bulk_create_records(doctype: str, rows: str) -> dict:
     """
     frappe.has_permission(doctype, "create", throw=True)
 
-    rows_data: list[dict] = frappe.parse_json(rows)
+    rows_data: list[dict] = (_fast_parse(rows) if isinstance(rows, str) else (rows or []))
     created: list[dict]   = []
     errors:  list[dict]   = []
 
@@ -385,8 +850,8 @@ def batch_check_links(doctype: str, rows_json: str, link_fields_json: str) -> di
     """
     frappe.has_permission(doctype, "create", throw=True)
 
-    rows: list[dict] = frappe.parse_json(rows_json)
-    link_fields: list[dict] = frappe.parse_json(link_fields_json)
+    rows: list[dict] = (_fast_parse(rows_json) if isinstance(rows_json, str) else (rows_json or []))
+    link_fields: list[dict] = (_fast_parse(link_fields_json) if isinstance(link_fields_json, str) else (link_fields_json or []))
 
     missing: dict[str, list[str]] = {}
 
@@ -719,7 +1184,7 @@ def frappe_aggregate_batch(queries: str) -> dict:
 	    {"results": [value, ...]}   — parallel to the input *queries* array.
 	"""
 	raw: str = queries if isinstance(queries, str) else frappe.as_json(queries)
-	qs: list = frappe.parse_json(raw) if isinstance(queries, str) else (queries or [])
+	qs: list = (_fast_parse(raw) if isinstance(raw, str) else (raw or [])) if isinstance(queries, str) else (queries or [])
 	if not qs:
 		return {"results": []}
 
@@ -997,9 +1462,9 @@ def compute_card_aggregate(
 
     _check_doctype_permission(doctype)
 
-    col_fields: list = json.loads(col_fieldnames) if isinstance(col_fieldnames, str) else (col_fieldnames or [])
-    lst_filters: list = json.loads(list_filters) if isinstance(list_filters, str) and list_filters else []
-    extra: list = json.loads(extra_filters) if isinstance(extra_filters, str) and extra_filters else []
+    col_fields: list = (_fast_parse(col_fieldnames) if isinstance(col_fieldnames, str) else (col_fieldnames or []))
+    lst_filters: list = _fast_parse(list_filters) if isinstance(list_filters, str) and list_filters else []
+    extra: list = _fast_parse(extra_filters) if isinstance(extra_filters, str) and extra_filters else []
 
     # agg_fieldname may be a formula/virtual col key (starts with _) — never a real DB field
     agg_field = (agg_fieldname or "").strip() or None
@@ -2521,7 +2986,7 @@ def fetch_web_api(url: str, method: str = "GET", headers: str = "", json_path: s
 	hdrs: dict = {}
 	if headers:
 		try:
-			hdrs = json.loads(headers) if isinstance(headers, str) else dict(headers)
+			hdrs = _fast_parse(headers) if isinstance(headers, str) else dict(headers)
 		except Exception:
 			pass
 
@@ -2664,10 +3129,10 @@ def smart_lookup_suggest(
 	except ImportError:
 		_USE_POLARS = False
 
-	src_headers = json.loads(source_headers)   # [{fieldname, label, fieldtype, options}, …]
-	tgt_headers = json.loads(target_headers)
-	src_sample  = json.loads(source_sample)    # [[val, …], …]  ≤ 200 rows
-	tgt_sample  = json.loads(target_sample)
+	src_headers = _fast_parse(source_headers)   # [{fieldname, label, fieldtype, options}, …]
+	tgt_headers = _fast_parse(target_headers)
+	src_sample  = _fast_parse(source_sample)    # [[val, …], …]  ≤ 200 rows
+	tgt_sample  = _fast_parse(target_sample)
 
 	suggestions: list  = []
 	claimed_src: set   = set()
@@ -3046,8 +3511,8 @@ def expand_relationship(
 	_check_doctype_permission(source_doctype)
 	_check_doctype_permission(target_doctype)
 
-	values        = [str(v) for v in json.loads(source_values) if v]
-	fields_wanted = json.loads(return_fields)
+	values        = [str(v) for v in _fast_parse(source_values) if v]
+	fields_wanted = _fast_parse(return_fields)
 	if not values:
 		return {"columns": [], "rows": [], "cardinality": "unknown"}
 
@@ -3438,7 +3903,7 @@ def bulk_fetch_for_duckdb(doctype, filters="[]", limit=100000):
 	parsed_filters = []
 	if filters:
 		try:
-			raw = frappe.parse_json(filters)
+			raw = (_fast_parse(filters) if isinstance(filters, str) else (filters or []))
 			if isinstance(raw, list):
 				parsed_filters = raw
 		except Exception:
@@ -3523,7 +3988,7 @@ def get_doctype_schema(doctypes):
 	"""
 	if isinstance(doctypes, str):
 		try:
-			doctypes = frappe.parse_json(doctypes)
+			doctypes = (_fast_parse(doctypes) if isinstance(doctypes, str) else (doctypes or []))
 		except Exception:
 			doctypes = [doctypes]
 
@@ -3877,7 +4342,7 @@ def save_role_profile(profile_name, roles):
 	roles: JSON-encoded list of role name strings.
 	"""
 	import json as _json
-	role_list = _json.loads(roles) if isinstance(roles, str) else list(roles)
+	role_list = _fast_parse(roles) if isinstance(roles, str) else list(roles)
 
 	doc = frappe.get_doc("Role Profile", profile_name)
 	doc.roles = []
@@ -3894,7 +4359,7 @@ def save_module_profile(profile_name, blocked_modules):
 	blocked_modules: JSON-encoded list of module name strings.
 	"""
 	import json as _json
-	mod_list = _json.loads(blocked_modules) if isinstance(blocked_modules, str) else list(blocked_modules)
+	mod_list = _fast_parse(blocked_modules) if isinstance(blocked_modules, str) else list(blocked_modules)
 
 	doc = frappe.get_doc("Module Profile", profile_name)
 	doc.block_modules = []

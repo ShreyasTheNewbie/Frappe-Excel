@@ -52,12 +52,7 @@ frappe.views.excel.FieldPicker = class FieldPicker {
 
 	// ── Public ────────────────────────────────────────────────────────────────
 
-	async open() {
-		// Pre-load child doctype metas so CT fields can be shown in picker
-		const table_dfs = (this.meta.fields || []).filter(df => df.fieldtype === "Table");
-		await Promise.all(
-			table_dfs.map(df => new Promise(resolve => frappe.model.with_doctype(df.options, resolve)))
-		);
+	open() {
 		this._build_fields();
 		this._create_dialog();
 	}
@@ -123,47 +118,6 @@ frappe.views.excel.FieldPicker = class FieldPicker {
 		rest.sort((a, b) => a.label.localeCompare(b.label));
 		this._fields = [...locked, ...rest];
 
-		// ── Child table fields (grouped by parent Table field) ───────────────
-		const saved_ct = frappe.get_user_settings(this.doctype)?.excel_ct_columns || [];
-		const visible_ct = new Set(saved_ct);
-
-		(this.meta.fields || []).forEach(df => {
-			if (df.fieldtype !== "Table") return;
-			// No client-side perm check for child tables — istable=1 DocTypes don't have
-			// their own permission rows; they inherit from the parent. Server enforces it.
-			const child_meta = frappe.get_meta(df.options);
-			if (!child_meta) return;
-
-			const child_dfs = (child_meta.fields || []).filter(cf =>
-				!FieldPicker.SKIP_TYPES.has(cf.fieldtype) &&
-				!FieldPicker.CT_SKIP.has(cf.fieldname) &&
-				!cf.is_virtual
-			);
-			if (!child_dfs.length) return;
-
-			// Section divider
-			this._fields.push({
-				fieldname: `__ct_section_${df.fieldname}`,
-				label: df.label || df.fieldname,
-				fieldtype: "Table",
-				is_section: true,
-				locked: false,
-				checked: false,
-			});
-
-			child_dfs.forEach(cf => {
-				const composite = `${df.fieldname}__${cf.fieldname}`;
-				this._fields.push({
-					fieldname: composite,
-					label: cf.label || cf.fieldname,
-					fieldtype: cf.fieldtype,
-					checked: visible_ct.has(composite),
-					locked: false,
-					is_ct: true,
-					ct_table_label: df.label || df.fieldname,
-				});
-			});
-		});
 	}
 
 	// ── Modal creation ────────────────────────────────────────────────────────
